@@ -320,8 +320,8 @@ class MainActivity : Activity() {
         box.addView(who, LinearLayout.LayoutParams(-1, -2))
         val grid = GridLayout(this).apply { columnCount = 3; layoutDirection = View.LAYOUT_DIRECTION_LTR }
         val gridWidthDp = (screenWidthDp - boxSidePadding * 2).coerceAtLeast(240)
-        val cellWidthDp = ((gridWidthDp - dp(8) * 2) / 3).coerceAtMost(dp(76))
-        val cellHeightDp = minOf(cellWidthDp, dp(if (screenHeightDp < 700) 64 else 76)).coerceAtLeast(dp(52))
+        val cellWidthDp = ((gridWidthDp - 16) / 3).coerceAtMost(76)
+        val cellHeightDp = minOf(cellWidthDp, if (screenHeightDp < 700) 64 else 76).coerceAtLeast(52)
         val keys = listOf("1" to "", "2" to "ABC", "3" to "DEF", "4" to "GHI", "5" to "JKL", "6" to "MNO", "7" to "PQRS", "8" to "TUV", "9" to "WXYZ", "*" to "", "0" to "+", "#" to "")
         for ((k, sub) in keys) {
             val b = LinearLayout(this).apply {
@@ -333,7 +333,7 @@ class MainActivity : Activity() {
                 if (k == "0") setOnLongClickListener { number.append("+"); keypad(); true }
             }
             grid.addView(b, GridLayout.LayoutParams().apply {
-                width = 0; height = cellHeightDp
+                width = 0; height = dp(cellHeightDp)
                 columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
                 setMargins(dp(4), dp(5), dp(4), dp(5))
             })
