@@ -75,17 +75,17 @@ jobs:
         working-directory: examples/kotlin-jvm
         run: ./gradlew --console=plain run | tee out.txt && grep -qx ok out.txt
 
-  # One macOS job for everything Apple: GitHub's macOS runners are scarce at busy times ("not acquired by Runner"),
+  # One macOS job for Swift SDK checks, docs, and examples (no iPhone app build): GitHub's macOS runners are scarce at busy times ("not acquired by Runner"),
   # so CI asks for one per push instead of two.
   apple:
-    name: Apple (Swift SDK, docs, examples, iPhone app)
+    name: Apple (Swift SDK, docs, examples)
     runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - name: Swift SDK tests (the root package runs the same tests as ios/TetherCore)
         run: swift test
-      - name: Builds for iOS, tvOS, watchOS, visionOS (each one whose SDK the runner has)
+      - name: Builds for tvOS, watchOS, visionOS (each one whose SDK the runner has)
         run: |
           for p in tvOS:appletvos watchOS:watchos visionOS:xros; do
             name=${p%%:*}; sdk=${p##*:}
