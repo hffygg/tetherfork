@@ -348,8 +348,7 @@ class MainActivity : Activity() {
         if (sims.size > 1) for (sim in sims) callButtons += pill(sim.name.ifEmpty { getString(R.string.sim_n, sim.slot + 1) }, colorId = R.color.ok) {
             app.dial(number.toString(), sim.sub); number.clear(); keypad()
         } else callButtons += pill(getString(R.string.call), colorId = R.color.ok) { app.dial(number.toString(), app.state.defaultSub); number.clear(); keypad() }
-        callButtons += pill("⌫", secondary = true, onClick = {}).apply {
-            setOnClickListener { if (number.isNotEmpty()) number.deleteCharAt(number.length - 1); keypad() }
+        callButtons += pill("⌫", secondary = true, onClick = { if (number.isNotEmpty()) number.deleteCharAt(number.length - 1); keypad() }).apply {
             setOnLongClickListener { number.clear(); keypad(); true }
         }
         box.addView(evenRow(*callButtons.toTypedArray()).apply { setPadding(0, dp(8), 0, 0) })
