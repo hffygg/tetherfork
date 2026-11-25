@@ -41,15 +41,15 @@ jobs:
           name: android-test-reports
           path: android/*/build/reports/
       # A build for testers without a release: debug-signed (CI has no release key), kept 30 days.
-      - name: Name the APKs
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Name the APKs for testers
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
           v=$(tr -d '[:space:]' < VERSION)-${GITHUB_SHA::7}
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk "dist/Tether-A54-$v-debug-signed.apk"
           cp android/client/build/outputs/apk/release/client-release.apk "dist/Tether-Client-$v-debug-signed.apk"
       - name: APKs for testers
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         uses: actions/upload-artifact@v7
         with:
           name: tether-apks-debug-signed
