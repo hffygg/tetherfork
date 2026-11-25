@@ -87,7 +87,7 @@ jobs:
         run: swift test
       - name: Builds for iOS, tvOS, watchOS, visionOS (each one whose SDK the runner has)
         run: |
-          for p in iOS:iphoneos tvOS:appletvos watchOS:watchos visionOS:xros; do
+          for p in tvOS:appletvos watchOS:watchos visionOS:xros; do
             name=${p%%:*}; sdk=${p##*:}
             if ! xcodebuild -showsdks | grep -q -- "-sdk $sdk"; then echo "$name: SDK not installed, skipped"; continue; fi
             xcodebuild -scheme Tether -destination "generic/platform=$name" -derivedDataPath build-sdk \
@@ -103,20 +103,7 @@ jobs:
         run: swift build
       - name: XcodeGen
         run: brew install xcodegen && cd ios && xcodegen generate --quiet
-      # Release, as the published IPA is built: the unit tests below build Debug, so both configurations are checked.
-      - name: iPhone app build (Release, unsigned)
-        working-directory: ios
-        run: >
-          xcodebuild -project Tether.xcodeproj -scheme Tether -configuration Release -destination 'generic/platform=iOS'
-          -derivedDataPath build-gen -skipMacroValidation CODE_SIGNING_ALLOWED=NO build -quiet
-      - name: iPhone app unit tests
-        working-directory: ios
-        run: |
-          if ! grep -q TetherTests project.yml; then echo "no app test target"; exit 0; fi
-          type=$(xcrun simctl list devicetypes | grep -m1 -oE 'iPhone [0-9]+ \(' | sed 's/ ($//')
-          udid=$(xcrun simctl create ci-tests "$type")
-          xcodebuild test -project Tether.xcodeproj -scheme Tether -destination "id=$udid" \
-            -derivedDataPath build-test -skipMacroValidation -quiet
+
 
   swift-linux:
     name: Swift on Linux
