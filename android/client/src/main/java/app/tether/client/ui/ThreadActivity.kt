@@ -23,7 +23,7 @@ class ThreadActivity : Activity() {
     private lateinit var list: ListView
     private lateinit var input: EditText
     private lateinit var title: android.widget.TextView
-    private lateinit var simButton: android.widget.Button
+    private lateinit var simButton: android.widget.TextView
     private var sub: Int? = null
     private var lastCount = -1
     private val listener: () -> Unit = { render() }
