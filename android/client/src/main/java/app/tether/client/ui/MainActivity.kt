@@ -382,10 +382,11 @@ class MainActivity : Activity() {
                 setOnClickListener { number.append(key); keypad() }
                 if (key == "0") setOnLongClickListener { number.append("+"); keypad(); true }
             }
-            grid.addView(keyView, GridLayout.LayoutParams().apply {
-                width = dp(cell); height = dp(cell)
-                setMargins(dp(4), dp(4), dp(4), dp(4))
-            })
+            val keyParams = GridLayout.LayoutParams()
+            keyParams.width = dp(cell)
+            keyParams.height = dp(cell)
+            keyParams.setMargins(dp(4), dp(4), dp(4), dp(4))
+            grid.addView(keyView, keyParams)
         }
         box.addView(grid)
 
@@ -447,7 +448,7 @@ class MainActivity : Activity() {
             isFillViewport = true
             clipChildren = false
             clipToPadding = false
-            addView(box, ScrollView.LayoutParams(-1, -2))
+            addView(box, android.view.ViewGroup.LayoutParams(-1, -2))
         }
         content.addView(scroll, FrameLayout.LayoutParams(-1, -1))
     }
