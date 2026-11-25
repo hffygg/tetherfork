@@ -318,24 +318,24 @@ class MainActivity : Activity() {
         val who = label(app.state.name(number.toString()) ?: "", R.color.muted, 14f).apply { gravity = Gravity.CENTER }
         box.addView(shown, LinearLayout.LayoutParams(-1, dp(if (screenHeightDp < 700) 44 else 56)))
         box.addView(who, LinearLayout.LayoutParams(-1, -2))
-        val grid = GridLayout(this).apply { columnCount = 3; layoutDirection = View.LAYOUT_DIRECTION_LTR }
-        val gridWidthDp = (screenWidthDp - boxSidePadding * 2).coerceAtLeast(240)
-        val cellWidthDp = ((gridWidthDp - 16) / 3).coerceAtMost(76)
-        val cellHeightDp = minOf(cellWidthDp, if (screenHeightDp < 700) 64 else 76).coerceAtLeast(52)
+        val gridCellDp = if (screenWidthDp < 360) 68 else 76
+        val grid = GridLayout(this).apply {
+            columnCount = 3; layoutDirection = View.LAYOUT_DIRECTION_LTR
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL }
+        }
         val keys = listOf("1" to "", "2" to "ABC", "3" to "DEF", "4" to "GHI", "5" to "JKL", "6" to "MNO", "7" to "PQRS", "8" to "TUV", "9" to "WXYZ", "*" to "", "0" to "+", "#" to "")
         for ((k, sub) in keys) {
             val b = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-                background = round(R.color.surface, 76)
+                background = round(R.color.surface, gridCellDp)
                 addView(label(k, size = 28f).apply { gravity = Gravity.CENTER })
                 if (sub.isNotEmpty()) addView(label(sub, R.color.muted, 10f).apply { gravity = Gravity.CENTER })
                 setOnClickListener { number.append(k); keypad() }
                 if (k == "0") setOnLongClickListener { number.append("+"); keypad(); true }
             }
             grid.addView(b, GridLayout.LayoutParams().apply {
-                width = 0; height = dp(cellHeightDp)
-                columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                setMargins(dp(4), dp(5), dp(4), dp(5))
+                width = dp(gridCellDp); height = dp(gridCellDp)
+                setMargins(dp(5), dp(5), dp(5), dp(5))
             })
         }
         box.addView(grid)
