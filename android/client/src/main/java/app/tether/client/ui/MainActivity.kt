@@ -332,7 +332,7 @@ class MainActivity : Activity() {
             setSingleLine()
             ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
         }
-        val who = label(app.state.name(number.toString()) ?: getString(R.string.dial_number_hint),
+        val who = label(app.state.name(number.toString()) ?: getString(R.string.phone),
             R.color.muted, 13f).apply { gravity = Gravity.CENTER }
         display.addView(shown, LinearLayout.LayoutParams(-1, dp(48)))
         display.addView(who, LinearLayout.LayoutParams(-1, -2))
@@ -355,7 +355,7 @@ class MainActivity : Activity() {
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
                     setColor(col(R.color.surface))
-                    setStroke(dp(1), col(R.color.divider))
+                    setStroke(dp(1), col(R.color.muted))
                 }
                 isClickable = true
                 isFocusable = true
@@ -417,7 +417,7 @@ class MainActivity : Activity() {
         }
         content.addView(ScrollView(this).apply {
             isFillViewport = true
-            addView(box, ScrollView.LayoutParams(-1, -2))
+            addView(box, android.view.ViewGroup.LayoutParams(-1, -2))
         })
     }
 
