@@ -308,37 +308,117 @@ class MainActivity : Activity() {
     private fun keypad() {
         list = null; listTab = -1
         content.removeAllViews()
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(24), dp(12), dp(24), dp(12)) }
-        val shown = label(if (number.isEmpty()) "" else app.format(number.toString()), size = 32f).apply { gravity = Gravity.CENTER; setSingleLine() }
-        val who = label(app.state.name(number.toString()) ?: "", R.color.muted, 14f).apply { gravity = Gravity.CENTER }
-        box.addView(shown, LinearLayout.LayoutParams(-1, dp(56)))
-        box.addView(who, LinearLayout.LayoutParams(-1, -2))
-        val grid = GridLayout(this).apply { columnCount = 3; layoutDirection = View.LAYOUT_DIRECTION_LTR }
-        val keys = listOf("1" to "", "2" to "ABC", "3" to "DEF", "4" to "GHI", "5" to "JKL", "6" to "MNO", "7" to "PQRS", "8" to "TUV", "9" to "WXYZ", "*" to "", "0" to "+", "#" to "")
-        for ((k, sub) in keys) {
-            val b = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-                background = round(R.color.surface, 76)
-                addView(label(k, size = 28f).apply { gravity = Gravity.CENTER })
-                if (sub.isNotEmpty()) addView(label(sub, R.color.muted, 10f).apply { gravity = Gravity.CENTER })
-                setOnClickListener { number.append(k); keypad() }
-                if (k == "0") setOnLongClickListener { number.append("+"); keypad(); true }
-            }
-            grid.addView(b, GridLayout.LayoutParams().apply { width = dp(76); height = dp(76); setMargins(dp(10), dp(8), dp(10), dp(8)) })
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(20), dp(12), dp(20), dp(16))
         }
-        box.addView(grid)
+
+        // Number display: visually separated from the keypad, with a clear contact match.
+        val display = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = GradientDrawable().apply {
+                setColor(col(R.color.surface))
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), col(R.color.accent))
+            }
+        }
+        val shown = label(if (number.isEmpty()) getString(R.string.phone) else app.format(number.toString()),
+            if (number.isEmpty()) R.color.muted else R.color.text, 30f, bold = true).apply {
+            gravity = Gravity.CENTER
+            setSingleLine()
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+        }
+        val who = label(app.state.name(number.toString()) ?: getString(R.string.dial_number_hint),
+            R.color.muted, 13f).apply { gravity = Gravity.CENTER }
+        display.addView(shown, LinearLayout.LayoutParams(-1, dp(48)))
+        display.addView(who, LinearLayout.LayoutParams(-1, -2))
+        box.addView(display, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+
+        val grid = GridLayout(this).apply {
+            columnCount = 3
+            rowCount = 4
+            layoutDirection = View.LAYOUT_DIRECTION_LTR
+            useDefaultMargins = false
+        }
+        val keys = listOf("1" to "", "2" to "ABC", "3" to "DEF",
+            "4" to "GHI", "5" to "JKL", "6" to "MNO",
+            "7" to "PQRS", "8" to "TUV", "9" to "WXYZ",
+            "*" to "", "0" to "+", "#" to "")
+        for ((key, sub) in keys) {
+            val keyView = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(col(R.color.surface))
+                    setStroke(dp(1), col(R.color.divider))
+                }
+                isClickable = true
+                isFocusable = true
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    foreground = android.graphics.drawable.RippleDrawable(
+                        android.content.res.ColorStateList.valueOf(col(R.color.accent)),
+                        null, null
+                    )
+                }
+                addView(label(key, R.color.text, 27f, bold = true).apply { gravity = Gravity.CENTER })
+                if (sub.isNotEmpty()) addView(label(sub, R.color.muted, 10f, bold = true).apply {
+                    gravity = Gravity.CENTER
+                    letterSpacing = 0.12f
+                })
+                setOnClickListener { number.append(key); keypad() }
+                if (key == "0") setOnLongClickListener { number.append("+"); keypad(); true }
+            }
+            val row = keys.indexOf(key to sub) / 3
+            val colIndex = keys.indexOf(key to sub) % 3
+            grid.addView(keyView, GridLayout.LayoutParams(
+                GridLayout.spec(row, 1, 1f), GridLayout.spec(colIndex, 1, 1f)
+            ).apply {
+                width = 0
+                height = dp(72)
+                setMargins(dp(7), dp(5), dp(7), dp(5))
+            })
+        }
+        box.addView(grid, LinearLayout.LayoutParams(-1, -2))
+
+        val actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(10), 0, dp(2))
+        }
         val sims = app.state.sims
-        val callRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, dp(12), 0, 0) }
-        if (sims.size > 1) for (sim in sims) callRow.addView(pill(sim.name.ifEmpty { getString(R.string.sim_n, sim.slot + 1) }, colorId = R.color.ok) {
-            app.dial(number.toString(), sim.sub); number.clear(); keypad()
-        }) else callRow.addView(pill(getString(R.string.call), colorId = R.color.ok) { app.dial(number.toString(), app.state.defaultSub); number.clear(); keypad() })
-        callRow.addView(pill("⌫", secondary = true) { if (number.isNotEmpty()) number.deleteCharAt(number.length - 1); keypad() }.apply {
+        if (sims.size > 1) {
+            for (sim in sims) actionRow.addView(pill(sim.name.ifEmpty {
+                getString(R.string.sim_n, sim.slot + 1)
+            }, colorId = R.color.ok) {
+                app.dial(number.toString(), sim.sub); number.clear(); keypad()
+            })
+        } else {
+            actionRow.addView(pill(getString(R.string.call), colorId = R.color.ok) {
+                app.dial(number.toString(), app.state.defaultSub); number.clear(); keypad()
+            })
+        }
+        actionRow.addView(pill("⌫", secondary = true) {
+            if (number.isNotEmpty()) number.deleteCharAt(number.length - 1)
+            keypad()
+        }.apply {
             setOnLongClickListener { number.clear(); keypad(); true }
         })
-        box.addView(callRow)
-        if (number.isNotEmpty() && app.state.name(number.toString()) == null)
-            box.addView(pill(getString(R.string.add_contact), secondary = true) { editContact(null, number.toString()) })
-        content.addView(ScrollView(this).apply { addView(box) })
+        box.addView(actionRow)
+
+        if (number.isNotEmpty() && app.state.name(number.toString()) == null) {
+            box.addView(pill(getString(R.string.add_contact), secondary = true) {
+                editContact(null, number.toString())
+            })
+        }
+        content.addView(ScrollView(this).apply {
+            isFillViewport = true
+            addView(box, ScrollView.LayoutParams(-1, -2))
+        })
     }
 
     // ------------------------------------------------------------------ Messages
