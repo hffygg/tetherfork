@@ -429,7 +429,7 @@ class MainActivity : Activity() {
                 app.dial(number.toString(), app.state.defaultSub); number.clear(); keypad()
             })
         }
-        buttons.addView(actionButton("⌫", false, getString(R.string.backspace)) {
+        buttons.addView(actionButton("⌫", false, "Delete last digit") {
             if (number.isNotEmpty()) number.deleteCharAt(number.length - 1)
             keypad()
         }.apply {
