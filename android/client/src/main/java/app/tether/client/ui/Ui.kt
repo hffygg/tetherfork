@@ -13,7 +13,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.BaseAdapter
-import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -55,15 +54,29 @@ fun Context.label(t: CharSequence, colorId: Int = R.color.text, size: Float = 15
     if (bold) setTypeface(typeface, Typeface.BOLD)
 }
 
-fun Context.pill(t: String, secondary: Boolean = false, colorId: Int = R.color.accent, onClick: () -> Unit) = Button(this).apply {
-    text = t; isAllCaps = false; textSize = 15f
+fun Context.pill(t: String, secondary: Boolean = false, colorId: Int = R.color.accent, onClick: () -> Unit) = TextView(this).apply {
+    text = t; textSize = 15f; typeface = Typeface.DEFAULT_BOLD
+    gravity = Gravity.CENTER; isClickable = true; isFocusable = true
     setTextColor(if (secondary) col(colorId) else col(R.color.background))
-    background = GradientDrawable().apply {
-        cornerRadius = dp(20).toFloat()
-        if (secondary) setStroke(dp(1), col(colorId)) else setColor(col(colorId))
+    val shape = GradientDrawable().apply {
+        cornerRadius = dp(16).toFloat()
+        if (secondary) {
+            setColor(col(R.color.surface))
+            setStroke(dp(1), col(colorId))
+        } else setColor(col(colorId))
     }
-    layoutParams = LinearLayout.LayoutParams(-2, dp(42)).apply { topMargin = dp(6); marginEnd = dp(8) }
-    setPadding(dp(16), 0, dp(16), 0)
+    background = shape
+    // TextView avoids the platform Button's default inset/minimum-size behavior that
+    // can distort custom shapes and squeeze labels on different Android versions.
+    minWidth = dp(48); minHeight = dp(44)
+    setPadding(dp(18), dp(10), dp(18), dp(10))
+    layoutParams = LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6); marginEnd = dp(8) }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        foreground = android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(col(if (secondary) colorId else R.color.surface)),
+            null, null
+        )
+    }
     setOnClickListener { onClick() }
 }
 
