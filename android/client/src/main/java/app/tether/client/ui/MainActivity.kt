@@ -64,10 +64,12 @@ class MainActivity : Activity() {
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(col(R.color.surface)) }
         listOf(R.string.tab_recents, R.string.tab_contacts, R.string.tab_keypad, R.string.tab_messages, R.string.tab_link).forEachIndexed { i, s ->
+            val tabIcons = listOf("◷", "👤", "⌨", "💬", "🔗")
             val b = TextView(this).apply {
-                text = getString(s); gravity = Gravity.CENTER; textSize = 13f
-                setPadding(dp(3), dp(8), dp(3), dp(8)); isSingleLine = false; maxLines = 2
-                setAutoSizeTextTypeUniformWithConfiguration(10, 13, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+                text = tabIcons[i] + "\n" + getString(s); gravity = Gravity.CENTER; textSize = 12f
+                setPadding(dp(2), dp(5), dp(2), dp(5)); isSingleLine = false; maxLines = 2
+                setAutoSizeTextTypeUniformWithConfiguration(10, 12, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+                minHeight = dp(62)
                 setOnClickListener { select(i) }
             }
             tabButtons += b
@@ -138,8 +140,10 @@ class MainActivity : Activity() {
         status.setTextColor(col(if (app.linkState == BleCentral.State.CONNECTED) R.color.ok else R.color.muted))
         tabButtons.forEachIndexed { i, b ->
             val badge = when (i) { TAB_RECENTS -> s.missedCount; TAB_MESSAGES -> s.unreadTotal; else -> 0 }
-            b.text = getString(listOf(R.string.tab_recents, R.string.tab_contacts, R.string.tab_keypad, R.string.tab_messages, R.string.tab_link)[i]) +
+            val tabIcons = listOf("◷", "👤", "⌨", "💬", "🔗")
+            val title = getString(listOf(R.string.tab_recents, R.string.tab_contacts, R.string.tab_keypad, R.string.tab_messages, R.string.tab_link)[i]) +
                 if (badge > 0) " ($badge)" else ""
+            b.text = tabIcons[i] + "\n" + title
             b.setTextColor(col(if (i == tab) R.color.accent else R.color.muted))
         }
         renderBanner()
