@@ -55,13 +55,13 @@ fun Context.label(t: CharSequence, colorId: Int = R.color.text, size: Float = 15
 }
 
 fun Context.pill(t: String, secondary: Boolean = false, colorId: Int = R.color.accent, onClick: () -> Unit) = TextView(this).apply {
-    text = t; textSize = 15f; gravity = Gravity.CENTER
+    text = t; textSize = 15f; gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; includeFontPadding = false
     setTextColor(if (secondary) col(colorId) else col(R.color.background))
     background = GradientDrawable().apply {
         cornerRadius = dp(12).toFloat()
         if (secondary) setStroke(dp(1), col(colorId)) else setColor(col(colorId))
     }
-    minimumHeight = dp(48); minWidth = dp(48)
+    minimumHeight = dp(48); minWidth = dp(48); isAllCaps = false; isClickable = true; isFocusable = true
     layoutParams = LinearLayout.LayoutParams(-2, dp(48)).apply { topMargin = dp(6); marginEnd = dp(8) }
     setPadding(dp(16), 0, dp(16), 0)
     setOnClickListener { onClick() }
