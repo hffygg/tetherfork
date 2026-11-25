@@ -88,7 +88,7 @@ fun View.weight(w: Float = 1f): View { layoutParams = LinearLayout.LayoutParams(
 fun Context.evenRow(vararg buttons: TextView) = LinearLayout(this).apply {
     orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
     buttons.forEachIndexed { i, b ->
-        val h = (b.layoutParams as? LinearLayout.LayoutParams)?.height ?: dp(42)
+        val h = dp(52)
         b.setSingleLine(); b.ellipsize = android.text.TextUtils.TruncateAt.END; b.setPadding(dp(8), 0, dp(8), 0)
         addView(b, LinearLayout.LayoutParams(0, h, 1f).apply {
             topMargin = dp(6); marginStart = if (i == 0) 0 else dp(4); marginEnd = if (i == buttons.lastIndex) 0 else dp(4)
