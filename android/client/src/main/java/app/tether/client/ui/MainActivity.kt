@@ -276,7 +276,8 @@ class MainActivity : Activity() {
 
     /**
      * The calls picked for deleting together (their ids; a line of calls in a row picks all of them), or null when
-     * Recents is not picking. Picking ends on Back, on ✕, on another tab, after deleting, and when nothing is picked.
+     * Recents is not picking. Picking ends on Back, on ✕, on another tab and after deleting; unpicking everything keeps
+     * it on (a day's heading tapped twice).
      */
     private var picked: LinkedHashSet<Long>? = null
     private var selectBar: View? = null
@@ -293,7 +294,7 @@ class MainActivity : Activity() {
         val ids = idsOf(items.getOrNull(pos) ?: return, items)
         if (ids.isNotEmpty() && set.containsAll(ids)) set.removeAll(ids.toSet()) else set.addAll(ids)
         list?.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
-        if (set.isEmpty()) stopPicking() else render()
+        render()   // stays selecting with nothing picked (a day picked and unpicked again); ✕ or Back ends it
     }
 
     private fun stopPicking() { picked = null; render() }
@@ -315,17 +316,21 @@ class MainActivity : Activity() {
             background = GradientDrawable().apply { cornerRadius = dp(28).toFloat(); setColor(col(R.color.surface)); setStroke(dp(1), col(R.color.background)) }
             isClickable = true   // taps on the bar never reach the list under it
             addView(iconButton(R.drawable.ic_close, getString(R.string.done_selecting)) { stopPicking() })
-            addView(label(getString(R.string.recents_selected, set.size), size = 15f, bold = true).apply { maxLines = 1 }.weight())
+            addView(label(getString(R.string.recents_selected, set.size), size = 15f, bold = true).apply {
+                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }.weight())
             one?.let { l -> addView(iconButton(R.drawable.ic_more_vert, getString(R.string.more_options)) { recentMenu(l.newest) }) }
-            addView(button(getString(if (allPicked) R.string.select_none else R.string.select_all), Look.TEXT) {
-                if (allPicked) stopPicking() else { set.addAll(all); render() }
-            }.apply { layoutParams = LinearLayout.LayoutParams(-2, -2) })
+            // An icon, so "3 selected" keeps its room (in words it cut the count to "1 selec"); lit when all are picked.
+            addView(iconButton(R.drawable.ic_select_all, getString(if (allPicked) R.string.select_none else R.string.select_all),
+                if (allPicked) R.color.accent else R.color.text) {
+                if (allPicked) set.clear() else set.addAll(all); render()
+            })
             addView(button(getString(R.string.delete), Look.FILLED, R.color.bad, iconId = R.drawable.ic_delete_sweep) {
+                if (set.isEmpty()) return@button
                 val ids = set.toList()
                 AlertDialog.Builder(this@MainActivity).setMessage(getString(R.string.delete_calls_confirm, ids.size))
                     .setPositiveButton(R.string.delete) { _, _ -> app.state.deleteRecents(ids); stopPicking() }
                     .setNegativeButton(android.R.string.cancel, null).show()
-            }.apply { layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(4) } })
+            }.apply { layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(4) }; isEnabled = set.isNotEmpty() })
         }
         frame.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(dp(4), 0, dp(4), dp(12)) })
         selectBar = bar

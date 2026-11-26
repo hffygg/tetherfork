@@ -10,9 +10,9 @@
   - while you scroll, a bubble at the top names the day you are in, and fades a moment after you stop;
   - tap still calls back.
 - Android client: **delete several calls at once** in Recents. A long press starts selecting; tap more calls, or a
-  day's heading for the whole day. A bar at the bottom shows how many are selected, with Select all and Delete (asks
-  first); ⋮ there opens the old one-call menu (call, message, copy, block) when one line is selected. Back or ✕ stops
-  selecting.
+  day's heading for the whole day (tap it again to unpick the day). A bar at the bottom shows how many are selected,
+  with Select all (an icon, lit when everything is picked; tap again to unpick all) and Delete (asks first); ⋮ there
+  opens the old one-call menu (call, message, copy, block) when one line is selected. Back or ✕ stops selecting.
 
 - SIM phone, USSD: a carrier menu can be answered while the SIM phone is locked. Its screen went off while the menu
   waited for your reply, so the reply found "no menu". Now:
