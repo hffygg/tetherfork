@@ -180,4 +180,10 @@
     <string name="ussd_failed">The code did not go through</string>
     <string name="recents_today">Today</string>
     <string name="recents_yesterday">Yesterday</string>
+    <string name="recents_selected">%d selected</string>
+    <string name="select_all">Select all</string>
+    <string name="select_none">Select none</string>
+    <string name="select_calls">Select calls</string>
+    <string name="done_selecting">Done selecting</string>
+    <string name="delete_calls_confirm">Delete %d calls from the Android phone\'s call log?</string>
 </resources>
