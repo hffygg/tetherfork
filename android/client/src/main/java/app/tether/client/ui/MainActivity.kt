@@ -123,7 +123,7 @@ class MainActivity : Activity() {
     private fun select(i: Int) {
         if (tab == TAB_RECENTS && i != TAB_RECENTS) app.state.markRecentsSeen()
         tab = i; query = ""; listTab = -1
-        if (picked != null) { picked = null; watchBack(false) }
+        if (picked != null || pickedChats != null) { picked = null; pickedChats = null; watchBack(false) }
         render()
     }
 
@@ -297,7 +297,7 @@ class MainActivity : Activity() {
         render()   // stays selecting with nothing picked (a day picked and unpicked again); ✕ or Back ends it
     }
 
-    private fun stopPicking() { picked = null; render() }
+    private fun stopPicking() { picked = null; pickedChats = null; render() }
 
     /** The bar floating at the bottom of Recents while picking: ✕, how many, ⋮ (one call's menu), select all, delete. */
     private fun selectionBar(items: List<RecentsLayout.Item>) {
@@ -352,7 +352,7 @@ class MainActivity : Activity() {
 
     @Deprecated("Android 12 and older; newer ones use watchBack()")
     override fun onBackPressed() {
-        if (picked != null) stopPicking() else @Suppress("DEPRECATION") super.onBackPressed()
+        if (picked != null || pickedChats != null) stopPicking() else @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     /** [a] with [f] of [b] mixed in (opaque: the list's rows sit on the page). */
@@ -624,30 +624,174 @@ class MainActivity : Activity() {
                 .setPositiveButton(R.string.next) { _, _ -> dialable(f.text.toString()).takeIf { it.isNotEmpty() }?.let { openThread(it) } }
                 .setNegativeButton(android.R.string.cancel, null).show()
         }
-        listScreen(getString(R.string.search), compose, Rows(convs) { c ->
-            val who = s.name(c.address) ?: app.format(c.address)
-            val muted = if (s.isMuted(c.thread)) "🔕 " else ""
-            val last = (if (!c.last.let { it.box == 1 }) getString(R.string.you) + ": " else "") + c.last.body.replace('\n', ' ')
-            rowView(avatar(who, s.photo(c.address)), muted + who + if (c.unread > 0) "  (${c.unread})" else "", last.take(120), time(c.last.date), bold = c.unread > 0)
-        }, onLong = { pos -> threadMenu(convs[pos].thread, convs[pos].address) }) { pos -> openThread(convs[pos].address, convs[pos].thread) }
+        // Conversations deleted meanwhile are no longer picked.
+        pickedChats?.retainAll(s.conversations.mapTo(HashSet()) { it.thread })
+        listScreen(getString(R.string.search), compose, Rows(convs) { c -> conversationRow(c, last = c === convs.lastOrNull()) }, onLong = { pos ->
+            // A long press starts picking conversations; the actions for them come in a bar above the list.
+            if (pickedChats == null) pickedChats = LinkedHashSet()
+            toggleChat(convs[pos].thread)
+        }) { pos ->
+            if (pickedChats != null) toggleChat(convs[pos].thread) else openThread(convs[pos].address, convs[pos].thread)
+        }
+        chatSelectionBar(convs)
     }
 
-    private fun threadMenu(thread: Long, address: String) {
-        val s = app.state
-        val muted = s.isMuted(thread); val blocked = s.isBlocked(address)
-        val opts = listOf(getString(R.string.call), getString(if (muted) R.string.unmute else R.string.mute),
-            getString(if (blocked) R.string.unblock else R.string.block), getString(R.string.mark_read), getString(R.string.delete_conversation))
-        AlertDialog.Builder(this).setTitle(s.name(address) ?: app.format(address)).setItems(opts.toTypedArray()) { _, w ->
-            when (w) {
-                0 -> app.dial(address, s.preferredSim(address))
-                1 -> s.setMuted(thread, !muted)
-                2 -> s.setBlocked(address, !blocked)
-                3 -> s.markRead(thread)
-                4 -> AlertDialog.Builder(this).setMessage(R.string.delete_conversation_confirm)
-                    .setPositiveButton(R.string.delete) { _, _ -> s.deleteConversation(thread) }.setNegativeButton(android.R.string.cancel, null).show()
-            }
-        }.show()
+    /** The conversations (threads) picked for acting on together, or null when the Messages list is not picking. */
+    private var pickedChats: LinkedHashSet<Long>? = null
+
+    private fun toggleChat(thread: Long) {
+        val set = pickedChats ?: return
+        if (!set.remove(thread)) set += thread
+        list?.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+        render()
     }
+
+    /**
+     * While picking: the search row gives way to a bar (✕, how many, select all) and a row of actions for the picked
+     * conversations: Read, Mute / Unmute, Block / Unblock, Delete, and Call when there is one. Both stay above the
+     * list, so they stay in place while it scrolls.
+     */
+    private fun chatSelectionBar(convs: List<app.tether.client.model.Conversation>) {
+        val box = listFrame?.parent as? LinearLayout ?: return
+        (0 until box.childCount).map(box::getChildAt).filter { it.tag == SELECTION_TAG }.forEach(box::removeView)
+        val search = box.getChildAt(0).takeIf { it !== listFrame }
+        val set = pickedChats
+        watchBack(set != null)
+        search?.visibility = if (set == null) View.VISIBLE else View.GONE
+        if (set == null) return
+        val s = app.state
+        val picked = s.conversations.filter { it.thread in set }
+        val all = convs.map { it.thread }
+        val allPicked = all.isNotEmpty() && set.containsAll(all)
+        fun bar() = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(col(R.color.surface)) }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), 0, dp(4), 0); background = bar()
+            addView(iconButton(R.drawable.ic_close, getString(R.string.done_selecting)) { stopPicking() })
+            addView(label(getString(R.string.recents_selected, set.size), size = 16f, bold = true).apply {
+                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(dp(4), 0, 0, 0) }.weight())
+            addView(iconButton(R.drawable.ic_select_all, getString(if (allPicked) R.string.select_none else R.string.select_all),
+                if (allPicked) R.color.accent else R.color.text) { if (allPicked) set.clear() else set.addAll(all); render() })
+        }
+        val muted = picked.isNotEmpty() && picked.all { s.isMuted(it.thread) }
+        val blocked = picked.isNotEmpty() && picked.all { s.isBlocked(it.address) }
+        val one = picked.singleOrNull()
+        fun done() { stopPicking() }
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(4)); background = bar()
+            listOfNotNull(
+                one?.let { c -> chatAction(R.drawable.ic_call, getString(R.string.call)) { app.dial(c.address, s.preferredSim(c.address)); done() } },
+                chatAction(R.drawable.ic_mark_read, getString(R.string.action_read)) { picked.forEach { s.markRead(it.thread) }; done() },
+                chatAction(if (muted) R.drawable.ic_notifications else R.drawable.ic_notifications_off, getString(if (muted) R.string.unmute else R.string.mute)) {
+                    picked.forEach { s.setMuted(it.thread, !muted) }; done() },
+                chatAction(R.drawable.ic_block, getString(if (blocked) R.string.unblock else R.string.block)) {
+                    picked.map { it.address }.distinct().forEach { s.setBlocked(it, !blocked) }; done() },
+                chatAction(R.drawable.ic_delete, getString(R.string.delete), R.color.bad) {
+                    AlertDialog.Builder(this@MainActivity).setMessage(getString(R.string.delete_chats_confirm, picked.size))
+                        .setPositiveButton(R.string.delete) { _, _ -> picked.forEach { s.deleteConversation(it.thread) }; done() }
+                        .setNegativeButton(android.R.string.cancel, null).show()
+                },
+            ).forEach { a -> a.isEnabled = picked.isNotEmpty(); a.alpha = if (a.isEnabled) 1f else 0.38f; addView(a, LinearLayout.LayoutParams(0, -2, 1f)) }
+        }
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; tag = SELECTION_TAG; setPadding(0, dp(4), 0, dp(6))
+            addView(head, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        }
+        box.addView(wrap, 0)
+    }
+
+    /** An action of the conversations bar: its icon over its name, with a ripple; faded when nothing is picked. */
+    private fun chatAction(iconId: Int, name: String, colorId: Int = R.color.text, onClick: () -> Unit): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(6)); minimumHeight = dp(56)
+        background = android.graphics.drawable.RippleDrawable(rippleColor(colorId), null, GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(col(R.color.text)) })
+        addView(android.widget.ImageView(context).apply { setImageDrawable(icon(iconId, colorId, 22)) }, LinearLayout.LayoutParams(dp(22), dp(22)))
+        addView(label(name, colorId, 12f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(dp(2), dp(4), dp(2), 0) }, LinearLayout.LayoutParams(-1, -2))
+        isClickable = true; isFocusable = true; contentDescription = name
+        setOnClickListener { if (isEnabled) onClick() }
+    }
+
+    /**
+     * One conversation, as phones' messaging apps list them: the picture (a person icon for a number that is not a
+     * contact), the name and two lines of the last text, the date and, under it, a round count of unread texts; unread
+     * ones in bold and brighter. A thin line under each, from the text's start.
+     */
+    private fun conversationRow(c: app.tether.client.model.Conversation, last: Boolean): View {
+        val s = app.state
+        val picking = pickedChats != null
+        val isPicked = pickedChats?.contains(c.thread) == true
+        val name = s.name(c.address)
+        val who = name ?: app.format(c.address)
+        val unread = c.unread > 0
+        val photo = s.photo(c.address)
+        val pic = if (picking) android.widget.ImageView(this).apply {
+            // Picking: a ring, filled with a check mark when picked.
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL
+                if (isPicked) setColor(col(R.color.accent)) else setStroke(dp(2), col(R.color.muted)) }
+            if (isPicked) setImageDrawable(icon(R.drawable.ic_check, R.color.background, 26))
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(14) }
+        } else if (name == null && photo == null) android.widget.ImageView(this).apply {
+            setImageDrawable(icon(R.drawable.ic_person, R.color.muted, 26)); scaleType = android.widget.ImageView.ScaleType.CENTER
+            background = round(R.color.surface, 48)
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(14) }
+        } else avatar(who, photo, 48).apply { (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(14) }
+        val preview = (if (c.last.box != 1) getString(R.string.you) + ": " else "") + c.last.body.replace('\n', ' ').take(160)
+        val line = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(12), dp(4), dp(12)); minimumHeight = dp(76)
+            if (isPicked) background = GradientDrawable().apply { cornerRadius = dp(14).toFloat()
+                setColor(android.content.res.ColorStateList.valueOf(col(R.color.accent)).withAlpha(0x26).defaultColor) }
+            addView(pic)
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(label(if (s.isMuted(c.thread)) "🔕 $who" else who, R.color.text, 16f, bold = unread).apply {
+                    setSingleLine(); ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, 0, 0, dp(2)) })
+                // The text's own direction (Persian on the right, English on the left), as in the conversation.
+                addView(label(preview, if (unread) R.color.text else R.color.muted, 14f).apply {
+                    maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, 0, 0, 0)
+                    textDirection = View.TEXT_DIRECTION_FIRST_STRONG; textAlignment = View.TEXT_ALIGNMENT_TEXT_START })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.END
+                setPaddingRelative(dp(10), 0, 0, 0)
+                addView(label(listDate(c.last.date), if (unread) R.color.accent else R.color.muted, 12f, bold = unread).apply {
+                    maxLines = 1; setPadding(0, 0, 0, 0) }, LinearLayout.LayoutParams(-2, -2))   // its own width: the column fits the date
+                if (unread) addView(label(if (c.unread > 99) "99+" else c.unread.toString(), R.color.background, 12f, bold = true).apply {
+                    gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(dp(6), 0, dp(6), 0)
+                    minWidth = dp(22); minimumWidth = dp(22); minHeight = dp(22); minimumHeight = dp(22)
+                    background = GradientDrawable().apply { cornerRadius = dp(11).toFloat(); setColor(col(R.color.accent)) }
+                }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
+            }, LinearLayout.LayoutParams(-2, -2))
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(line)
+            // A grey line, clearly there but quieter than the text.
+            if (!last) addView(View(context).apply { setBackgroundColor(android.content.res.ColorStateList.valueOf(col(R.color.muted)).withAlpha(0x55).defaultColor) },
+                LinearLayout.LayoutParams(-1, dp(1)).apply { marginStart = dp(4 + 48 + 14) })
+            isSelected = isPicked
+            contentDescription = listOfNotNull(if (isPicked) getString(R.string.recents_selected, 1) else null, who, if (unread) getString(R.string.unread_n, c.unread) else null,
+                preview, listDate(c.last.date)).joinToString(", ")
+        }
+    }
+
+    /** A conversation's date: the time today, "Yesterday", the weekday this week, else the date (the year when not this one). */
+    private fun listDate(ms: Long): String {
+        val day = dayStart(ms); val today = dayStart(System.currentTimeMillis())
+        return when {
+            day == today -> android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_TIME)
+            today - day < 6 * 86_400_000L + 3_600_000L && day != dayStart(today - 12 * 3600_000L) ->
+                android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_WEEKDAY or android.text.format.DateUtils.FORMAT_ABBREV_WEEKDAY)
+            day == dayStart(today - 12 * 3600_000L) -> getString(R.string.recents_yesterday)
+            java.util.Calendar.getInstance().apply { timeInMillis = ms }.get(java.util.Calendar.YEAR) == java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) ->
+                android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_NO_YEAR or android.text.format.DateUtils.FORMAT_ABBREV_MONTH)
+            else -> android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_NUMERIC_DATE)
+        }
+    }
+
 
     private fun openThread(address: String, thread: Long? = null) {
         startActivity(Intent(this, ThreadActivity::class.java).putExtra(ThreadActivity.EXTRA_ADDRESS, address)
@@ -847,6 +991,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val SELECTION_TAG = "selection"
         const val EXTRA_TAB = "tab"; const val EXTRA_NUMBER = "number"
         const val TAB_RECENTS = 0; const val TAB_CONTACTS = 1; const val TAB_KEYPAD = 2; const val TAB_MESSAGES = 3; const val TAB_LINK = 4
         private val TAB_NAMES = listOf(R.string.tab_recents, R.string.tab_contacts, R.string.tab_keypad, R.string.tab_messages, R.string.tab_link)
