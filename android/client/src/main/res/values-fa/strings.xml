@@ -177,4 +177,12 @@
     <string name="ussd_recent">کدهای اخیر</string>
     <string name="ussd_invalid">این کد اپراتور نیست (مثل *123#)</string>
     <string name="ussd_failed">کد اجرا نشد</string>
+    <string name="recents_today">امروز</string>
+    <string name="recents_yesterday">دیروز</string>
+    <string name="recents_selected">%d انتخاب شده</string>
+    <string name="select_all">انتخاب همه</string>
+    <string name="select_none">لغو انتخاب همه</string>
+    <string name="select_calls">انتخاب تماس‌ها</string>
+    <string name="done_selecting">پایان انتخاب</string>
+    <string name="delete_calls_confirm">%d تماس از گزارش تماس گوشی اندروید حذف شوند؟</string>
 </resources>

@@ -32,6 +32,7 @@ import android.widget.TextView
 import app.tether.client.R
 import app.tether.client.link.BleCentral
 import app.tether.client.link.LinkService
+import app.tether.client.model.RecentsLayout
 import app.tether.client.model.Search
 import app.tether.client.model.UssdCodes
 import app.tether.client.model.dialable
@@ -50,6 +51,9 @@ class MainActivity : Activity() {
     private var query = ""
     private var number = StringBuilder()
     private var list: ListView? = null
+    /** The frame around [list], and Recents' floating date bubble in it (null until Recents shows). */
+    private var listFrame: FrameLayout? = null
+    private var dayBubble: TextView? = null
     private var listTab = -1
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -119,6 +123,7 @@ class MainActivity : Activity() {
     private fun select(i: Int) {
         if (tab == TAB_RECENTS && i != TAB_RECENTS) app.state.markRecentsSeen()
         tab = i; query = ""; listTab = -1
+        if (picked != null) { picked = null; watchBack(false) }
         render()
     }
 
@@ -206,9 +211,11 @@ class MainActivity : Activity() {
                 box.addView(top)
             }
             val l = ListView(this).apply { divider = null; isFocusable = false }
-            box.addView(l, LinearLayout.LayoutParams(-1, 0, 1f))
+            // The list in a frame, so a screen can float something over it (Recents' date bubble).
+            val frame = FrameLayout(this).apply { addView(l, FrameLayout.LayoutParams(-1, -1)) }
+            box.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(box)
-            list = l; listTab = tab
+            list = l; listTab = tab; listFrame = frame; dayBubble = null
             l
         }
         val first = lv.firstVisiblePosition; val top = lv.getChildAt(0)?.top ?: 0
@@ -231,19 +238,260 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ Recents
 
+    /**
+     * Recents grouped by day, as phones' own call logs show them: a day heading ("Today", "Yesterday", the date) over a
+     * card of that day's calls; per line the direction (arrow), the name (red when missed, a count for calls in a row
+     * from the same number), the SIM and how long the call took, and the time. While the list scrolls, a bubble at the
+     * top names the day being scrolled through, and fades a moment after it stops.
+     */
     private fun recents() {
         val s = app.state
-        val items = s.recents.filter { Search.matches(query, listOfNotNull(it.name, s.name(it.num)), listOf(it.num)) }
+        val calls = s.recents.filter { Search.matches(query, listOfNotNull(it.name, s.name(it.num)), listOf(it.num)) }
+        val items = RecentsLayout.build(calls, ::dayStart)
         val clear = iconButton(R.drawable.ic_delete_sweep, getString(R.string.clear_all), R.color.accent) {
             AlertDialog.Builder(this).setMessage(R.string.clear_recents_confirm)
                 .setPositiveButton(R.string.clear_all) { _, _ -> s.clearRecents() }.setNegativeButton(android.R.string.cancel, null).show()
         }
-        listScreen(getString(R.string.search), clear, Rows(items) { c ->
-            val who = s.name(c.num) ?: c.name ?: app.format(c.num)
-            val kind = getString(when (c.type) { 1 -> R.string.call_in; 2 -> R.string.call_out; 3 -> R.string.call_missed; 5 -> R.string.call_declined; 6 -> R.string.call_blocked; else -> R.string.call_other })
-            val sub = listOfNotNull(kind, s.simName(c.sub), if (c.dur > 0) "%d:%02d".format(c.dur / 60, c.dur % 60) else null).joinToString(" · ")
-            rowView(avatar(who, s.photo(c.num)), who, sub, time(c.date), if (c.type == 3) R.color.bad else R.color.text)
-        }, onLong = { recentMenu(items[it]) }) { app.dial(items[it].num, items[it].sub ?: s.defaultSub) }
+        // Calls deleted meanwhile (here or on the Android phone) are no longer picked.
+        if (picked != null) { val have = s.recents.mapTo(HashSet()) { it.id }; picked!!.retainAll(have) }
+        listScreen(getString(R.string.search), clear, Rows(items) { item ->
+            when (item) {
+                is RecentsLayout.Item.Day -> label(dayName(item.day).uppercase(), R.color.muted, 13f, bold = true).apply {
+                    letterSpacing = 0.06f; setPadding(dp(8), dp(16), dp(8), dp(8))
+                }
+                is RecentsLayout.Item.Line -> recentLine(item)
+            }
+        }, onLong = { pos ->
+            // A long press starts picking calls (as phones' own call logs do); the one-call menu is on the bar (⋮).
+            val line = items[pos] as? RecentsLayout.Item.Line
+            if (picked == null && line != null) { picked = LinkedHashSet(); togglePick(items, pos) } else togglePick(items, pos)
+        }) { pos ->
+            if (picked != null) togglePick(items, pos)
+            else (items[pos] as? RecentsLayout.Item.Line)?.newest?.let { app.dial(it.num, it.sub ?: s.defaultSub) }
+        }
+        list?.selector = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)   // the lines ripple themselves
+        dateBubble(items)
+        selectionBar(items)
+    }
+
+    /**
+     * The calls picked for deleting together (their ids; a line of calls in a row picks all of them), or null when
+     * Recents is not picking. Picking ends on Back, on ✕, on another tab and after deleting; unpicking everything keeps
+     * it on (a day's heading tapped twice).
+     */
+    private var picked: LinkedHashSet<Long>? = null
+    private var selectBar: View? = null
+    private var backWhilePicking: Any? = null
+
+    private fun idsOf(item: RecentsLayout.Item, items: List<RecentsLayout.Item>): List<Long> = when (item) {
+        is RecentsLayout.Item.Line -> item.calls.map { it.id }
+        // A day's heading picks (or unpicks) every call of that day.
+        is RecentsLayout.Item.Day -> items.filterIsInstance<RecentsLayout.Item.Line>().filter { it.day == item.day }.flatMap { l -> l.calls.map { it.id } }
+    }
+
+    private fun togglePick(items: List<RecentsLayout.Item>, pos: Int) {
+        val set = picked ?: return
+        val ids = idsOf(items.getOrNull(pos) ?: return, items)
+        if (ids.isNotEmpty() && set.containsAll(ids)) set.removeAll(ids.toSet()) else set.addAll(ids)
+        list?.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+        render()   // stays selecting with nothing picked (a day picked and unpicked again); ✕ or Back ends it
+    }
+
+    private fun stopPicking() { picked = null; render() }
+
+    /** The bar floating at the bottom of Recents while picking: ✕, how many, ⋮ (one call's menu), select all, delete. */
+    private fun selectionBar(items: List<RecentsLayout.Item>) {
+        val frame = listFrame ?: return
+        selectBar?.let { if (it.parent === frame) frame.removeView(it) }; selectBar = null
+        val set = picked
+        watchBack(set != null)
+        if (set == null) return
+        val all = items.filterIsInstance<RecentsLayout.Item.Line>().flatMap { l -> l.calls.map { it.id } }
+        val allPicked = all.isNotEmpty() && set.containsAll(all)
+        val one = items.filterIsInstance<RecentsLayout.Item.Line>().singleOrNull { l -> l.calls.any { it.id in set } }
+            ?.takeIf { l -> l.calls.map { it.id }.containsAll(set) }
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(4), dp(8), dp(4)); elevation = dp(8).toFloat()
+            background = GradientDrawable().apply { cornerRadius = dp(28).toFloat(); setColor(col(R.color.surface)); setStroke(dp(1), col(R.color.background)) }
+            isClickable = true   // taps on the bar never reach the list under it
+            addView(iconButton(R.drawable.ic_close, getString(R.string.done_selecting)) { stopPicking() })
+            addView(label(getString(R.string.recents_selected, set.size), size = 15f, bold = true).apply {
+                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }.weight())
+            one?.let { l -> addView(iconButton(R.drawable.ic_more_vert, getString(R.string.more_options)) { recentMenu(l.newest) }) }
+            // An icon, so "3 selected" keeps its room (in words it cut the count to "1 selec"); lit when all are picked.
+            addView(iconButton(R.drawable.ic_select_all, getString(if (allPicked) R.string.select_none else R.string.select_all),
+                if (allPicked) R.color.accent else R.color.text) {
+                if (allPicked) set.clear() else set.addAll(all); render()
+            })
+            addView(button(getString(R.string.delete), Look.FILLED, R.color.bad, iconId = R.drawable.ic_delete_sweep) {
+                if (set.isEmpty()) return@button
+                val ids = set.toList()
+                AlertDialog.Builder(this@MainActivity).setMessage(getString(R.string.delete_calls_confirm, ids.size))
+                    .setPositiveButton(R.string.delete) { _, _ -> app.state.deleteRecents(ids); stopPicking() }
+                    .setNegativeButton(android.R.string.cancel, null).show()
+            }.apply { layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(4) }; isEnabled = set.isNotEmpty() })
+        }
+        frame.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(dp(4), 0, dp(4), dp(12)) })
+        selectBar = bar
+        // Room under the last call, so the bar never covers it.
+        list?.apply { clipToPadding = false; setPadding(0, 0, 0, dp(84)) }
+    }
+
+    /** Back ends picking (Android 13+ through the back dispatcher: an app targeting Android 16 gets no onBackPressed). */
+    private fun watchBack(on: Boolean) {
+        if (!on) list?.setPadding(0, 0, 0, 0)
+        if (Build.VERSION.SDK_INT >= 33) {
+            val d = onBackInvokedDispatcher
+            if (on && backWhilePicking == null) {
+                val cb = android.window.OnBackInvokedCallback { stopPicking() }
+                d.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb); backWhilePicking = cb
+            } else if (!on) (backWhilePicking as? android.window.OnBackInvokedCallback)?.let { d.unregisterOnBackInvokedCallback(it); backWhilePicking = null }
+        }
+    }
+
+    @Deprecated("Android 12 and older; newer ones use watchBack()")
+    override fun onBackPressed() {
+        if (picked != null) stopPicking() else @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    /** The start of [ms]'s local day (groups calls by day). */
+    private fun dayStart(ms: Long): Long = java.util.Calendar.getInstance().apply {
+        timeInMillis = ms; set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+    /** "Today", "Yesterday", else the weekday and date ("Thursday, November 19"; with the year when not this year). */
+    private fun dayName(day: Long): String {
+        val today = dayStart(System.currentTimeMillis())
+        val yesterday = dayStart(today - 12 * 3600_000L)
+        if (day == today) return getString(R.string.recents_today)
+        if (day == yesterday) return getString(R.string.recents_yesterday)
+        val thisYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) ==
+            java.util.Calendar.getInstance().apply { timeInMillis = day }.get(java.util.Calendar.YEAR)
+        return android.text.format.DateUtils.formatDateTime(this, day, android.text.format.DateUtils.FORMAT_SHOW_DATE or
+            android.text.format.DateUtils.FORMAT_SHOW_WEEKDAY or if (thisYear) android.text.format.DateUtils.FORMAT_NO_YEAR else android.text.format.DateUtils.FORMAT_SHOW_YEAR)
+    }
+
+    /** [a] with [f] of [b] mixed in (opaque: the list's rows sit on the page). */
+    private fun mix(a: Int, b: Int, f: Float): Int {
+        fun ch(s: Int) = (((a shr s) and 0xFF) * (1 - f) + ((b shr s) and 0xFF) * f).toInt() shl s
+        return (0xFF shl 24) or ch(16) or ch(8) or ch(0)
+    }
+
+    /** One line of a day's card: direction, name (and count), SIM and duration, time. Rounded where its card is. */
+    private fun recentLine(item: RecentsLayout.Item.Line): View {
+        val s = app.state
+        val c = item.newest
+        val who = s.name(c.num) ?: c.name ?: app.format(c.num)
+        val missed = c.type == 3
+        val (iconId, iconColor) = when (c.type) {
+            1 -> R.drawable.ic_call_received to R.color.muted
+            2 -> R.drawable.ic_call_made to R.color.ok
+            3 -> R.drawable.ic_call_missed to R.color.bad
+            5 -> R.drawable.ic_call_declined to R.color.bad
+            6 -> R.drawable.ic_block to R.color.muted
+            else -> R.drawable.ic_call_received to R.color.muted
+        }
+        val kind = getString(when (c.type) { 1 -> R.string.call_in; 2 -> R.string.call_out; 3 -> R.string.call_missed; 5 -> R.string.call_declined; 6 -> R.string.call_blocked; else -> R.string.call_other })
+        val duration = if (c.dur > 0) "%d:%02d".format(c.dur / 60, c.dur % 60) else null
+        val time = android.text.format.DateUtils.formatDateTime(this, c.date, android.text.format.DateUtils.FORMAT_SHOW_TIME)
+        val sim = s.simName(c.sub)
+        val r = dp(18).toFloat()
+        val radii = when (item.pos) {
+            RecentsLayout.Pos.ONLY -> floatArrayOf(r, r, r, r, r, r, r, r)
+            RecentsLayout.Pos.FIRST -> floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            RecentsLayout.Pos.LAST -> floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r)
+            RecentsLayout.Pos.MIDDLE -> floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
+        }
+        val picking = picked != null
+        val isPicked = picking && item.calls.all { it.id in picked!! }
+        val body = GradientDrawable().apply {
+            cornerRadii = radii
+            setColor(if (isPicked) mix(col(R.color.surface), col(R.color.accent), 0.2f) else col(R.color.surface))
+        }
+        val mask = GradientDrawable().apply { cornerRadii = radii; setColor(col(R.color.text)) }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = android.graphics.drawable.RippleDrawable(rippleColor(R.color.text), body, mask)
+            // A thin line between the lines of a card (not above its first).
+            if (item.pos == RecentsLayout.Pos.MIDDLE || item.pos == RecentsLayout.Pos.LAST)
+                addView(View(context).apply { setBackgroundColor(col(R.color.background)) }, LinearLayout.LayoutParams(-1, dp(1)).apply { marginStart = dp(48) })
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(10), dp(16), dp(10)); minimumHeight = dp(62)
+                if (picking) addView(android.widget.ImageView(context).apply {
+                    // A check mark in a filled circle when picked, an empty ring when not.
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        if (isPicked) setColor(col(R.color.accent)) else setStroke(dp(2), col(R.color.muted))
+                    }
+                    if (isPicked) setImageDrawable(icon(R.drawable.ic_check, R.color.background, 16))
+                    scaleType = android.widget.ImageView.ScaleType.CENTER
+                }, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(12) })
+                else addView(android.widget.ImageView(context).apply { setImageDrawable(icon(iconId, iconColor, 20)) }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(14) })
+                val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+                texts.addView(label(android.text.SpannableStringBuilder(who).apply {
+                    if (item.calls.size > 1) {
+                        val at = length; append(" (${item.calls.size})")
+                        setSpan(android.text.style.ForegroundColorSpan(col(R.color.muted)), at, length, 0)
+                    }
+                }, if (missed) R.color.bad else R.color.text, 16f).apply { setSingleLine(); ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, 0, 0, 0) })
+                texts.addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(3), 0, 0)
+                    sim?.let { addView(label(it, R.color.muted, 11f).apply {
+                        setPadding(dp(5), 0, dp(5), 0); background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setStroke(dp(1), col(R.color.muted)); alpha = 120 }
+                    }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }) }
+                    addView(label(duration ?: kind, R.color.muted, 13f).apply { setPadding(0, 0, 0, 0); if (duration != null) textDirection = View.TEXT_DIRECTION_LTR })
+                })
+                addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(label(time, if (missed) R.color.bad else R.color.muted, 14f).apply { setPadding(dp(8), 0, 0, 0); textDirection = View.TEXT_DIRECTION_LTR })
+            })
+            // TalkBack: one sentence for the line.
+            isSelected = isPicked
+            contentDescription = listOfNotNull(if (isPicked) getString(R.string.recents_selected, item.calls.size) else null, who, kind, item.calls.size.takeIf { it > 1 }?.toString(), sim, duration, time).joinToString(", ")
+        }
+    }
+
+    /** Whether the user is scrolling Recents (a finger on it, or a fling): kept here, as each render adds a new listener. */
+    private var recentsScrolling = false
+    private var bubbleShown = false
+    /** One fade for every render's listener, so a later render can still cancel it. */
+    private val bubbleFade = Runnable { bubbleShown = false; dayBubble?.animate()?.alpha(0f)?.setDuration(250)?.start() }
+
+    /**
+     * The bubble that names the day being scrolled through (as the Samsung Phone app does), "Today" at the top too.
+     * Shown when a scroll starts (not when the list only moves because it was rebuilt), faded a moment after it stops.
+     * It is shown once per scroll: starting the fade-in again on every scrolled frame kept it invisible until the
+     * list stopped.
+     */
+    private fun dateBubble(items: List<RecentsLayout.Item>) {
+        val frame = listFrame ?: return
+        val bubble = dayBubble ?: label("", size = 15f).apply {
+            gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; maxLines = 1
+            setPadding(dp(18), dp(8), dp(18), dp(8)); alpha = 0f; elevation = dp(6).toFloat()
+            background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(col(R.color.surface)); setStroke(dp(1), col(R.color.background)) }
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            frame.addView(this, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(10) })
+            dayBubble = this; recentsScrolling = false; bubbleShown = false
+        }
+        fun show() {
+            bubble.removeCallbacks(bubbleFade)
+            if (bubbleShown) return
+            bubbleShown = true
+            bubble.animate().cancel(); bubble.animate().alpha(1f).setDuration(120).start()
+        }
+        list?.setOnScrollListener(object : android.widget.AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(v: android.widget.AbsListView, state: Int) {
+                recentsScrolling = state != android.widget.AbsListView.OnScrollListener.SCROLL_STATE_IDLE
+                if (recentsScrolling) show() else { bubble.removeCallbacks(bubbleFade); bubble.postDelayed(bubbleFade, 900) }
+            }
+            override fun onScroll(v: android.widget.AbsListView, first: Int, visible: Int, total: Int) {
+                RecentsLayout.dayAt(items, first)?.let { bubble.text = dayName(it) }
+                if (recentsScrolling) show()
+            }
+        })
     }
 
     private fun recentMenu(c: CallEntry) {
