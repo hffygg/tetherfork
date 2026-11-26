@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Android client: **low-battery alert for the SIM phone**. Link › Low battery alert (off, or 10 % to 50 %; 20 % by
+  default): when the SIM phone is not charging and its battery falls to that level, a notification says so, and it
+  alerts again at every 5 % below it (the level in between updates quietly). It goes away when the phone charges or
+  rises above the level. It has its own notification category, "Android phone battery", apart from texts.
+
 - Android client: **the Messages list looks like a phone's messaging app**: a thin line between conversations; the
   date on the right (the time today, "Yesterday", the weekday this week, else the date) and under it a round count
   of unread texts instead of "(3)" after the name; unread conversations in bold with a brighter preview and a teal

@@ -1,5 +1,6 @@
 package app.tether.client.ui
 
+import app.tether.client.model.BatteryAlert
 import app.tether.client.report.ClientReport
 import app.tether.client.report.ReportUi
 import android.Manifest
@@ -825,6 +826,21 @@ class MainActivity : Activity() {
             BleCentral.State.HANDSHAKING, BleCentral.State.CONNECTING -> getString(R.string.state_connecting)
         }, if (connected) R.color.ok else R.color.muted))
         if (st != null) phone.addView(label(getString(R.string.battery, st.optInt("battery"), if (st.optBoolean("charging")) " ⚡" else ""), R.color.muted, 14f))
+        // The low-battery alert for the Android phone, chosen here: off or a level; it also alerts at every 5 % below.
+        if (app.identity.isPaired) {
+            val n = app.notifier
+            fun word(v: Int) = if (v == 0) getString(R.string.battery_alert_off) else "$v %"
+            phone.addView(row(
+                label(getString(R.string.battery_alert), size = 15f).weight(),
+                button(word(n.batteryAlert), Look.TONAL, iconId = R.drawable.ic_battery_alert) {
+                    val choices = BatteryAlert.CHOICES
+                    AlertDialog.Builder(this).setTitle(R.string.battery_alert)
+                        .setSingleChoiceItems(choices.map(::word).toTypedArray(), choices.indexOf(n.batteryAlert)) { d, w -> n.batteryAlert = choices[w]; d.dismiss(); render() }
+                        .setNegativeButton(android.R.string.cancel, null).show()
+                }.apply { contentDescription = getString(R.string.battery_alert) + ", " + word(n.batteryAlert) },
+            ))
+            phone.addView(label(getString(R.string.battery_alert_help), R.color.muted, 12f))
+        }
         // The Android phone cannot bridge call audio (Android 8-10, or its software gives none): calls stay on it.
         when (st?.optJSONObject("helper")?.optString("audio")) {
             "unavailable" -> phone.addView(label(getString(R.string.audio_unavailable), R.color.warn, 13f))

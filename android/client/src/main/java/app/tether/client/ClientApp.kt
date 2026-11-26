@@ -133,6 +133,8 @@ class ClientApp : Application(), LinkEvents {
             if (::telecom.isInitialized) runCatching { telecom.syncPhoneAccounts() }
             // A call on another device: in the notification bar with Move here.
             if (::calls.isInitialized) runCatching { notifier.syncRemoteCalls(calls.remote) }
+            // The Android phone's battery below the alert level: a notification, again at every 5 % lower.
+            runCatching { notifier.syncBattery() }
             listeners.forEach { runCatching { it() } }
         }
     }

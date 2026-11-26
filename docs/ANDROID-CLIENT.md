@@ -57,7 +57,7 @@ and call history. The SIM phone stays in a bag; you use the other phone.
   else a new code that carries the choice, *123# then 2 sends *123*2#), and send recent codes again
   (`ui/UssdActivity.kt`, `model/Ussd.kt`). A code dialed in the Phone app with Tether's account opens this screen.
 - **Notifications** for texts (with reply and mark-read) and missed calls.
-- **Link screen**: the SIM phone's battery and signal per SIM, the connected devices, the switches (mobile data,
+- **Link screen**: the SIM phone's battery (with a low-battery alert: a notification at a chosen level and every 5 % below it, in its own notification category; `model/BatteryAlert.kt`) and signal per SIM, the connected devices, the switches (mobile data,
   data SIM, hotspot, Bluetooth tethering, airplane mode, network mode per SIM, Share VPN), the audio self-test, the
   Link log, **Send a problem report** (one `.txt` file for an issue, numbers and names removed), pairing and unpairing.
 - **tel: links**: `ACTION_DIAL`, `ACTION_VIEW` and `ACTION_CALL` for `tel:` are registered, so tapping a number in
