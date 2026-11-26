@@ -178,4 +178,6 @@
     <string name="ussd_recent">Recent codes</string>
     <string name="ussd_invalid">Not a carrier code (like *123#)</string>
     <string name="ussd_failed">The code did not go through</string>
+    <string name="recents_today">Today</string>
+    <string name="recents_yesterday">Yesterday</string>
 </resources>

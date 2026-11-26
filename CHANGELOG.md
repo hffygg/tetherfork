@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Android client: **Recents grouped by day**, like a phone's own call log:
+  - a heading for each day (Today, Yesterday, then the date) over a card of that day's calls;
+  - on each line: the direction as an arrow (missed and declined in red, blocked crossed out), the name (red when
+    missed), the SIM, how long the call took, and the time;
+  - calls in a row from the same number with the same direction share one line with a count, for example "(2)";
+  - while you scroll, a bubble at the top names the day you are in, and fades a moment after you stop;
+  - tap still calls back, and a long press still opens the menu.
+
 - SIM phone, USSD: a carrier menu can be answered while the SIM phone is locked. Its screen went off while the menu
   waited for your reply, so the reply found "no menu". Now:
   - every read of the menu wakes the screen first;

@@ -177,4 +177,6 @@
     <string name="ussd_recent">کدهای اخیر</string>
     <string name="ussd_invalid">این کد اپراتور نیست (مثل *123#)</string>
     <string name="ussd_failed">کد اجرا نشد</string>
+    <string name="recents_today">امروز</string>
+    <string name="recents_yesterday">دیروز</string>
 </resources>

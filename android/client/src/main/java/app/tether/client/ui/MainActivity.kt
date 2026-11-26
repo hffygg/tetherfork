@@ -32,6 +32,7 @@ import android.widget.TextView
 import app.tether.client.R
 import app.tether.client.link.BleCentral
 import app.tether.client.link.LinkService
+import app.tether.client.model.RecentsLayout
 import app.tether.client.model.Search
 import app.tether.client.model.UssdCodes
 import app.tether.client.model.dialable
@@ -50,6 +51,9 @@ class MainActivity : Activity() {
     private var query = ""
     private var number = StringBuilder()
     private var list: ListView? = null
+    /** The frame around [list], and Recents' floating date bubble in it (null until Recents shows). */
+    private var listFrame: FrameLayout? = null
+    private var dayBubble: TextView? = null
     private var listTab = -1
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -206,9 +210,11 @@ class MainActivity : Activity() {
                 box.addView(top)
             }
             val l = ListView(this).apply { divider = null; isFocusable = false }
-            box.addView(l, LinearLayout.LayoutParams(-1, 0, 1f))
+            // The list in a frame, so a screen can float something over it (Recents' date bubble).
+            val frame = FrameLayout(this).apply { addView(l, FrameLayout.LayoutParams(-1, -1)) }
+            box.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(box)
-            list = l; listTab = tab
+            list = l; listTab = tab; listFrame = frame; dayBubble = null
             l
         }
         val first = lv.firstVisiblePosition; val top = lv.getChildAt(0)?.top ?: 0
@@ -231,19 +237,139 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ Recents
 
+    /**
+     * Recents grouped by day, as phones' own call logs show them: a day heading ("Today", "Yesterday", the date) over a
+     * card of that day's calls; per line the direction (arrow), the name (red when missed, a count for calls in a row
+     * from the same number), the SIM and how long the call took, and the time. While the list scrolls, a bubble at the
+     * top names the day being scrolled through, and fades a moment after it stops.
+     */
     private fun recents() {
         val s = app.state
-        val items = s.recents.filter { Search.matches(query, listOfNotNull(it.name, s.name(it.num)), listOf(it.num)) }
+        val calls = s.recents.filter { Search.matches(query, listOfNotNull(it.name, s.name(it.num)), listOf(it.num)) }
+        val items = RecentsLayout.build(calls, ::dayStart)
         val clear = iconButton(R.drawable.ic_delete_sweep, getString(R.string.clear_all), R.color.accent) {
             AlertDialog.Builder(this).setMessage(R.string.clear_recents_confirm)
                 .setPositiveButton(R.string.clear_all) { _, _ -> s.clearRecents() }.setNegativeButton(android.R.string.cancel, null).show()
         }
-        listScreen(getString(R.string.search), clear, Rows(items) { c ->
-            val who = s.name(c.num) ?: c.name ?: app.format(c.num)
-            val kind = getString(when (c.type) { 1 -> R.string.call_in; 2 -> R.string.call_out; 3 -> R.string.call_missed; 5 -> R.string.call_declined; 6 -> R.string.call_blocked; else -> R.string.call_other })
-            val sub = listOfNotNull(kind, s.simName(c.sub), if (c.dur > 0) "%d:%02d".format(c.dur / 60, c.dur % 60) else null).joinToString(" · ")
-            rowView(avatar(who, s.photo(c.num)), who, sub, time(c.date), if (c.type == 3) R.color.bad else R.color.text)
-        }, onLong = { recentMenu(items[it]) }) { app.dial(items[it].num, items[it].sub ?: s.defaultSub) }
+        listScreen(getString(R.string.search), clear, Rows(items) { item ->
+            when (item) {
+                is RecentsLayout.Item.Day -> label(dayName(item.day).uppercase(), R.color.muted, 13f, bold = true).apply {
+                    letterSpacing = 0.06f; setPadding(dp(8), dp(16), dp(8), dp(8))
+                }
+                is RecentsLayout.Item.Line -> recentLine(item)
+            }
+        }, onLong = { pos -> (items[pos] as? RecentsLayout.Item.Line)?.let { recentMenu(it.newest) } }) { pos ->
+            (items[pos] as? RecentsLayout.Item.Line)?.newest?.let { app.dial(it.num, it.sub ?: s.defaultSub) }
+        }
+        list?.selector = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)   // the lines ripple themselves
+        dateBubble(items)
+    }
+
+    /** The start of [ms]'s local day (groups calls by day). */
+    private fun dayStart(ms: Long): Long = java.util.Calendar.getInstance().apply {
+        timeInMillis = ms; set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+    /** "Today", "Yesterday", else the weekday and date ("Thursday, November 19"; with the year when not this year). */
+    private fun dayName(day: Long): String {
+        val today = dayStart(System.currentTimeMillis())
+        val yesterday = dayStart(today - 12 * 3600_000L)
+        if (day == today) return getString(R.string.recents_today)
+        if (day == yesterday) return getString(R.string.recents_yesterday)
+        val thisYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) ==
+            java.util.Calendar.getInstance().apply { timeInMillis = day }.get(java.util.Calendar.YEAR)
+        return android.text.format.DateUtils.formatDateTime(this, day, android.text.format.DateUtils.FORMAT_SHOW_DATE or
+            android.text.format.DateUtils.FORMAT_SHOW_WEEKDAY or if (thisYear) android.text.format.DateUtils.FORMAT_NO_YEAR else android.text.format.DateUtils.FORMAT_SHOW_YEAR)
+    }
+
+    /** One line of a day's card: direction, name (and count), SIM and duration, time. Rounded where its card is. */
+    private fun recentLine(item: RecentsLayout.Item.Line): View {
+        val s = app.state
+        val c = item.newest
+        val who = s.name(c.num) ?: c.name ?: app.format(c.num)
+        val missed = c.type == 3
+        val (iconId, iconColor) = when (c.type) {
+            1 -> R.drawable.ic_call_received to R.color.muted
+            2 -> R.drawable.ic_call_made to R.color.ok
+            3 -> R.drawable.ic_call_missed to R.color.bad
+            5 -> R.drawable.ic_call_declined to R.color.bad
+            6 -> R.drawable.ic_block to R.color.muted
+            else -> R.drawable.ic_call_received to R.color.muted
+        }
+        val kind = getString(when (c.type) { 1 -> R.string.call_in; 2 -> R.string.call_out; 3 -> R.string.call_missed; 5 -> R.string.call_declined; 6 -> R.string.call_blocked; else -> R.string.call_other })
+        val duration = if (c.dur > 0) "%d:%02d".format(c.dur / 60, c.dur % 60) else null
+        val time = android.text.format.DateUtils.formatDateTime(this, c.date, android.text.format.DateUtils.FORMAT_SHOW_TIME)
+        val sim = s.simName(c.sub)
+        val r = dp(18).toFloat()
+        val radii = when (item.pos) {
+            RecentsLayout.Pos.ONLY -> floatArrayOf(r, r, r, r, r, r, r, r)
+            RecentsLayout.Pos.FIRST -> floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            RecentsLayout.Pos.LAST -> floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r)
+            RecentsLayout.Pos.MIDDLE -> floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
+        }
+        val body = GradientDrawable().apply { cornerRadii = radii; setColor(col(R.color.surface)) }
+        val mask = GradientDrawable().apply { cornerRadii = radii; setColor(col(R.color.text)) }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = android.graphics.drawable.RippleDrawable(rippleColor(R.color.text), body, mask)
+            // A thin line between the lines of a card (not above its first).
+            if (item.pos == RecentsLayout.Pos.MIDDLE || item.pos == RecentsLayout.Pos.LAST)
+                addView(View(context).apply { setBackgroundColor(col(R.color.background)) }, LinearLayout.LayoutParams(-1, dp(1)).apply { marginStart = dp(48) })
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(10), dp(16), dp(10)); minimumHeight = dp(62)
+                addView(android.widget.ImageView(context).apply { setImageDrawable(icon(iconId, iconColor, 20)) }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(14) })
+                val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+                texts.addView(label(android.text.SpannableStringBuilder(who).apply {
+                    if (item.calls.size > 1) {
+                        val at = length; append(" (${item.calls.size})")
+                        setSpan(android.text.style.ForegroundColorSpan(col(R.color.muted)), at, length, 0)
+                    }
+                }, if (missed) R.color.bad else R.color.text, 16f).apply { setSingleLine(); ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, 0, 0, 0) })
+                texts.addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(3), 0, 0)
+                    sim?.let { addView(label(it, R.color.muted, 11f).apply {
+                        setPadding(dp(5), 0, dp(5), 0); background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setStroke(dp(1), col(R.color.muted)); alpha = 120 }
+                    }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }) }
+                    addView(label(duration ?: kind, R.color.muted, 13f).apply { setPadding(0, 0, 0, 0); if (duration != null) textDirection = View.TEXT_DIRECTION_LTR })
+                })
+                addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(label(time, if (missed) R.color.bad else R.color.muted, 14f).apply { setPadding(dp(8), 0, 0, 0); textDirection = View.TEXT_DIRECTION_LTR })
+            })
+            // TalkBack: one sentence for the line.
+            contentDescription = listOfNotNull(who, kind, item.calls.size.takeIf { it > 1 }?.toString(), sim, duration, time).joinToString(", ")
+        }
+    }
+
+    /**
+     * The bubble that names the day being scrolled through (as the Samsung Phone app does): shown while the list
+     * moves, faded a moment after it stops, not shown at the very top (the first heading is in view there).
+     */
+    private fun dateBubble(items: List<RecentsLayout.Item>) {
+        val frame = listFrame ?: return
+        val bubble = dayBubble ?: label("", size = 15f).apply {
+            gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; maxLines = 1
+            setPadding(dp(18), dp(8), dp(18), dp(8)); alpha = 0f; elevation = dp(6).toFloat()
+            background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(col(R.color.surface)); setStroke(dp(1), col(R.color.background)) }
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            frame.addView(this, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(10) })
+            dayBubble = this
+        }
+        val fade = Runnable { bubble.animate().alpha(0f).setDuration(250).start() }
+        list?.setOnScrollListener(object : android.widget.AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(v: android.widget.AbsListView, state: Int) {
+                bubble.removeCallbacks(fade)
+                if (state == android.widget.AbsListView.OnScrollListener.SCROLL_STATE_IDLE) bubble.postDelayed(fade, 900)
+            }
+            override fun onScroll(v: android.widget.AbsListView, first: Int, visible: Int, total: Int) {
+                val moving = v.getChildAt(0)?.let { first > 0 || it.top < 0 } ?: false
+                RecentsLayout.dayAt(items, first)?.let { bubble.text = dayName(it) }
+                if (moving && bubble.alpha < 1f) bubble.animate().alpha(1f).setDuration(120).start()
+                if (!moving) { bubble.removeCallbacks(fade); bubble.alpha = 0f }
+            }
+        })
     }
 
     private fun recentMenu(c: CallEntry) {
