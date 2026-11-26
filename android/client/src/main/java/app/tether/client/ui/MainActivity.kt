@@ -343,9 +343,17 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Whether the user is scrolling Recents (a finger on it, or a fling): kept here, as each render adds a new listener. */
+    private var recentsScrolling = false
+    private var bubbleShown = false
+    /** One fade for every render's listener, so a later render can still cancel it. */
+    private val bubbleFade = Runnable { bubbleShown = false; dayBubble?.animate()?.alpha(0f)?.setDuration(250)?.start() }
+
     /**
-     * The bubble that names the day being scrolled through (as the Samsung Phone app does): shown while the list
-     * moves, faded a moment after it stops, not shown at the very top (the first heading is in view there).
+     * The bubble that names the day being scrolled through (as the Samsung Phone app does), "Today" at the top too.
+     * Shown when a scroll starts (not when the list only moves because it was rebuilt), faded a moment after it stops.
+     * It is shown once per scroll: starting the fade-in again on every scrolled frame kept it invisible until the
+     * list stopped.
      */
     private fun dateBubble(items: List<RecentsLayout.Item>) {
         val frame = listFrame ?: return
@@ -355,19 +363,22 @@ class MainActivity : Activity() {
             background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(col(R.color.surface)); setStroke(dp(1), col(R.color.background)) }
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             frame.addView(this, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(10) })
-            dayBubble = this
+            dayBubble = this; recentsScrolling = false; bubbleShown = false
         }
-        val fade = Runnable { bubble.animate().alpha(0f).setDuration(250).start() }
+        fun show() {
+            bubble.removeCallbacks(bubbleFade)
+            if (bubbleShown) return
+            bubbleShown = true
+            bubble.animate().cancel(); bubble.animate().alpha(1f).setDuration(120).start()
+        }
         list?.setOnScrollListener(object : android.widget.AbsListView.OnScrollListener {
             override fun onScrollStateChanged(v: android.widget.AbsListView, state: Int) {
-                bubble.removeCallbacks(fade)
-                if (state == android.widget.AbsListView.OnScrollListener.SCROLL_STATE_IDLE) bubble.postDelayed(fade, 900)
+                recentsScrolling = state != android.widget.AbsListView.OnScrollListener.SCROLL_STATE_IDLE
+                if (recentsScrolling) show() else { bubble.removeCallbacks(bubbleFade); bubble.postDelayed(bubbleFade, 900) }
             }
             override fun onScroll(v: android.widget.AbsListView, first: Int, visible: Int, total: Int) {
-                val moving = v.getChildAt(0)?.let { first > 0 || it.top < 0 } ?: false
                 RecentsLayout.dayAt(items, first)?.let { bubble.text = dayName(it) }
-                if (moving && bubble.alpha < 1f) bubble.animate().alpha(1f).setDuration(120).start()
-                if (!moving) { bubble.removeCallbacks(fade); bubble.alpha = 0f }
+                if (recentsScrolling) show()
             }
         })
     }
