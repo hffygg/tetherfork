@@ -6,6 +6,10 @@
   date on the right (the time today, "Yesterday", the weekday this week, else the date) and under it a round count
   of unread texts instead of "(3)" after the name; unread conversations in bold with a brighter preview and a teal
   date; two lines of the last text, in its own direction; a person icon for numbers that are not contacts.
+- Android client: **act on several conversations at once**. A long press starts selecting (tap more, or select all);
+  the search row becomes a bar with how many are selected and a row of actions: Read, Mute / Unmute, Block / Unblock,
+  Delete (asks first), and Call when one is selected. They stay above the list while it scrolls. Back or ✕ stops
+  selecting. This replaces the long-press menu, whose actions are all there.
 
 - Android client: **conversations laid out like a phone's messaging app**:
   - a heading for each day (Today, Yesterday, then the weekday and date) in a chip between two lines, instead of a
