@@ -122,6 +122,24 @@ fun Context.avatar(name: String, photo: String?, sizeDp: Int = 40): View {
 fun Context.time(ms: Long): String = if (DateUtils.isToday(ms)) DateUtils.formatDateTime(this, ms, DateUtils.FORMAT_SHOW_TIME)
     else DateUtils.getRelativeTimeSpanString(ms, System.currentTimeMillis(), DateUtils.DAY_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString()
 
+/** The start of [ms]'s local day (groups calls and texts by day). */
+fun dayStart(ms: Long): Long = java.util.Calendar.getInstance().apply {
+    timeInMillis = ms; set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+    set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+}.timeInMillis
+
+/** "Today", "Yesterday", else the weekday and date ("Thursday, November 19"; with the year when not this year). */
+fun Context.dayName(day: Long): String {
+    val today = dayStart(System.currentTimeMillis())
+    val yesterday = dayStart(today - 12 * 3600_000L)
+    if (day == today) return getString(R.string.recents_today)
+    if (day == yesterday) return getString(R.string.recents_yesterday)
+    val thisYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) ==
+        java.util.Calendar.getInstance().apply { timeInMillis = day }.get(java.util.Calendar.YEAR)
+    return DateUtils.formatDateTime(this, day, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_WEEKDAY or
+        if (thisYear) DateUtils.FORMAT_NO_YEAR else DateUtils.FORMAT_SHOW_YEAR)
+}
+
 /** The words for a [Problem] (its detail comes from the Android phone as is). */
 fun Context.describe(p: Problem): String {
     val base = when (p.kind) {

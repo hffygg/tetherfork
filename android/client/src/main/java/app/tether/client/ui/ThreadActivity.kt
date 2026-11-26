@@ -14,9 +14,13 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ListView
 import app.tether.client.R
+import app.tether.client.model.ThreadLayout
 import app.tether.core.Sms
 
-/** One conversation: bubbles, read state, send from either SIM, copy / delete, call, mute, block. */
+/**
+ * One conversation: bubbles under a heading per day, the time beside them, a line above the texts that were unread
+ * when it was opened (it opens there); send from either SIM, copy / delete, call, mute, block.
+ */
 class ThreadActivity : Activity() {
     private var thread = Long.MIN_VALUE
     private lateinit var address: String
@@ -27,6 +31,11 @@ class ThreadActivity : Activity() {
     private lateinit var sendButton: View
     private var sub: Int? = null
     private var lastCount = -1
+    /** The first text that was unread when the conversation opened (the "Unread messages" line goes above it). */
+    private var unreadFrom: Long? = null
+    private var unreadChecked = false
+    /** The SIM beside the time: only when this conversation's texts went over more than one SIM. */
+    private var showSim = false
     private val listener: () -> Unit = { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,20 +106,61 @@ class ThreadActivity : Activity() {
         simButton.visibility = if (sims.size > 1) View.VISIBLE else View.GONE
         simButton.text = sims.firstOrNull { it.sub == sub }?.let { it.name.ifEmpty { getString(R.string.sim_n, it.slot + 1) } } ?: getString(R.string.sim)
         val msgs = if (thread == Long.MIN_VALUE) emptyList() else s.messages(thread)
+        // Read before marking it read: once, when the texts are first there.
+        val first = !unreadChecked && msgs.isNotEmpty()
+        if (first) { unreadFrom = ThreadLayout.firstUnread(msgs, s.readUpTo[thread] ?: 0); unreadChecked = true }
         s.markRead(thread)
+        showSim = s.sims.size > 1 && msgs.mapTo(HashSet()) { it.sub }.size > 1
+        val items = ThreadLayout.build(msgs, ::dayStart, unreadFrom)
         val atEnd = list.lastVisiblePosition >= list.count - 2
-        list.adapter = Rows(msgs) { bubble(it) }
-        list.setOnItemLongClickListener { _, _, pos, _ -> bubbleMenu(msgs[pos]); true }
-        if (atEnd || msgs.size != lastCount) list.setSelection(msgs.size - 1)
+        list.adapter = Rows(items) { item ->
+            when (item) {
+                is ThreadLayout.Item.Day -> label(dayName(item.day), R.color.muted, 13f).apply {
+                    gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(dp(16), dp(20), dp(16), dp(8))
+                }
+                ThreadLayout.Item.Unread -> unreadLine()
+                is ThreadLayout.Item.Msg -> bubble(item)
+            }
+        }
+        list.setOnItemLongClickListener { _, _, pos, _ -> (items[pos] as? ThreadLayout.Item.Msg)?.let { bubbleMenu(it.sms) }; true }
+        val unreadAt = items.indexOf(ThreadLayout.Item.Unread)
+        // Opened with unread texts: at the line (the older ones above it); else, and as new texts come, at the end.
+        if (first && unreadAt >= 0) list.setSelectionFromTop(unreadAt, dp(8))
+        else if (atEnd || msgs.size != lastCount) list.setSelection(items.size - 1)
         lastCount = msgs.size
     }
 
-    private fun bubble(m: Sms): View {
-        val mine = m.box != 1
-        val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = if (mine) Gravity.END else Gravity.START; setPadding(dp(12), dp(3), dp(12), dp(3)) }
+    /** The line above the texts that were unread when the conversation opened. */
+    private fun unreadLine(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(16), dp(14), dp(16), dp(6))
+        fun rule() = View(context).apply { setBackgroundColor(col(R.color.muted)); alpha = 0.4f }
+        addView(rule(), LinearLayout.LayoutParams(0, dp(1), 1f))
+        addView(label(getString(R.string.unread_messages), R.color.accent, 13f, bold = true).apply {
+            setPadding(dp(12), 0, dp(12), 0)
+            setCompoundDrawablesRelative(icon(R.drawable.ic_chat, R.color.accent, 16), null, null, null); compoundDrawablePadding = dp(6)
+        })
+        addView(rule(), LinearLayout.LayoutParams(0, dp(1), 1f))
+    }
+
+    /**
+     * A text's bubble, and beside it (towards the middle, at its bottom) the time, the SIM on a dual-SIM phone and
+     * "Sending" / "Not delivered"; a run of texts in one minute shows the time once, on the last.
+     */
+    private fun bubble(item: ThreadLayout.Item.Msg): View {
+        val m = item.sms
+        val mine = ThreadLayout.mine(m)
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = (if (mine) Gravity.END else Gravity.START) or Gravity.BOTTOM
+            setPadding(dp(12), dp(if (item.startsRun) 8 else 2), dp(12), dp(2))
+        }
+        val r = dp(18).toFloat(); val s = dp(6).toFloat()
+        // The corner on the sender's side is tighter where the next bubble of the run follows (as phones draw runs).
+        val tail = if (item.showTime) r else s
+        val radii = if (mine) floatArrayOf(r, r, r, r, tail, tail, r, r) else floatArrayOf(r, r, r, r, r, r, tail, tail)
         val body = label(m.body, if (mine) R.color.background else R.color.text, 16f).apply {
             setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(col(if (mine) R.color.accent else R.color.surface)) }
+            background = GradientDrawable().apply { cornerRadii = radii; setColor(col(if (mine) R.color.accent else R.color.surface)) }
             // Links, e-mail addresses and phone numbers, except "numbers" that are dates, versions or amounts.
             text = android.text.SpannableString(m.body).also { sp ->
                 Linkify.addLinks(sp, Linkify.WEB_URLS or Linkify.PHONE_NUMBERS or Linkify.EMAIL_ADDRESSES)
@@ -120,11 +170,20 @@ class ThreadActivity : Activity() {
             }
             movementMethod = android.text.method.LinkMovementMethod.getInstance()
             textAlignment = View.TEXT_ALIGNMENT_VIEW_START
-            maxWidth = (resources.displayMetrics.widthPixels * 0.78).toInt()
+            maxWidth = (resources.displayMetrics.widthPixels * 0.72).toInt()
         }
-        wrap.addView(body, LinearLayout.LayoutParams(-2, -2))
         val state = when (m.box) { 4, 6 -> getString(R.string.sending); 5 -> getString(R.string.not_delivered); else -> null }
-        wrap.addView(label(listOfNotNull(time(m.date), app.state.simName(m.sub), state).joinToString(" · "), if (m.box == 5) R.color.bad else R.color.muted, 11f))
+        val side = if (!item.showTime && state == null) null else LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = if (mine) Gravity.END else Gravity.START
+            setPaddingRelative(dp(if (mine) 0 else 8), 0, dp(if (mine) 8 else 0), dp(2))   // relative: the gap faces the bubble in Persian too
+            if (showSim) app.state.simName(m.sub)?.let { addView(label(it, R.color.muted, 10f).apply { setPadding(0, 0, 0, 0); maxLines = 1 }) }
+            addView(label(android.text.format.DateUtils.formatDateTime(context, m.date, android.text.format.DateUtils.FORMAT_SHOW_TIME), R.color.muted, 11f).apply {
+                setPadding(0, 0, 0, 0); textDirection = View.TEXT_DIRECTION_LTR })
+            state?.let { addView(label(it, if (m.box == 5) R.color.bad else R.color.muted, 11f).apply { setPadding(0, 0, 0, 0) }) }
+        }
+        if (mine) side?.let { wrap.addView(it) }
+        wrap.addView(body, LinearLayout.LayoutParams(-2, -2))
+        if (!mine) side?.let { wrap.addView(it) }
         return wrap
     }
 
