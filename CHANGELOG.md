@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Android phone app: when a client marks texts read, the link log (and so the problem report) says how many were
+  unread before, how many Android changed, how many are unread right after and 5 s and 30 s later, and which app is
+  the default messaging app: it tells whether Android's message store keeps the read state, or the messaging app
+  shows its own copy.
+
 - Android client: **the Messages list looks like a phone's messaging app**: a thin line between conversations; the
   date on the right (the time today, "Yesterday", the weekday this week, else the date) and under it a round count
   of unread texts instead of "(3)" after the name; unread conversations in bold with a brighter preview and a teal

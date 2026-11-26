@@ -316,6 +316,17 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                         n = app.sms.markRead(thread, upTo)
                     }
                     Log.i(TAG, "sms.read thread=$thread upTo=$upTo -> $n row(s)")
+                    // Whether the read state holds in Android's message store: read back now and twice later, so a
+                    // problem report tells "Android's store is read, the messaging app keeps its own copy" apart from
+                    // "something set it back to unread". In the link log (kept across restarts, in the report).
+                    if (!dry(c) && pending > 0) {
+                        val app0 = runCatching { android.provider.Telephony.Sms.getDefaultSmsPackage(app) }.getOrNull() ?: "?"
+                        val now = app.sms.unreadCount(thread, upTo)
+                        LinkLog.add("sms read: thread $thread, $pending unread before, $n changed, $now unread after (messaging app $app0)")
+                        for (s in longArrayOf(5, 30)) work.schedule({
+                            LinkLog.add("sms read: thread $thread, ${app.sms.unreadCount(thread, upTo)} unread ${s} s later")
+                        }, s, java.util.concurrent.TimeUnit.SECONDS)
+                    }
                     targets().filter { it !== c }.forEach { it.send(Message(T.SMS_READ, JSONObject().put("thread", thread).put("upTo", upTo))) }
                 }
             }
