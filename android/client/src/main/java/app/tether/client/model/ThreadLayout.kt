@@ -36,6 +36,12 @@ object ThreadLayout {
         return out
     }
 
+    /** The day the item at [pos] belongs to (the pinned day while scrolling), or null. */
+    fun dayAt(items: List<Item>, pos: Int): Long? {
+        for (i in minOf(pos, items.lastIndex) downTo 0) (items[i] as? Item.Day)?.let { return it.day }
+        return null
+    }
+
     /** The first text still unread (incoming, not read, newer than what this side marked read), or null. */
     fun firstUnread(msgs: List<Sms>, readUpTo: Long): Long? = msgs.firstOrNull { !mine(it) && !it.read && it.id > readUpTo }?.id
 }

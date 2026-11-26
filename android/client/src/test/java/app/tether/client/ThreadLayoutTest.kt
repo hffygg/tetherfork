@@ -34,6 +34,13 @@ class ThreadLayoutTest {
         assertEquals(true, (items[1] as Item.Msg).showTime)
     }
 
+    @Test fun dayOfAnyRow() {
+        val items = ThreadLayout.build(listOf(sms(1, 1000), sms(2, day + 5, read = false)), ::dayOf, 2)
+        // Day, msg 1, Day, Unread, msg 2
+        assertEquals(listOf(0L, 0L, day, day, day), items.indices.map { ThreadLayout.dayAt(items, it) })
+        assertNull(ThreadLayout.dayAt(emptyList(), 0))
+    }
+
     @Test fun noUnreadLineForOwnOrAlreadyReadTexts() {
         assertNull(ThreadLayout.firstUnread(listOf(sms(1, 1000, box = 2, read = false), sms(2, 2000, read = false)), readUpTo = 2))
     }
