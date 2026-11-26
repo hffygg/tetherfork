@@ -45,6 +45,8 @@ class Notifier(private val app: ClientApp) {
     // ------------------------------------------------------------------ the Android phone's battery
 
     private val alertPrefs = app.getSharedPreferences("alerts", Context.MODE_PRIVATE)
+    /** The level the battery notification shows now (-1: none shown since this process started). */
+    private var batteryShown = -1
 
     /** The low-battery alert level for the Android phone (0 = off). */
     var batteryAlert: Int
@@ -55,6 +57,8 @@ class Notifier(private val app: ClientApp) {
      * Low battery on the Android phone: a notification at the chosen level and again (it alerts once more) at every
      * 5 % below it; gone when it charges or rises above the level. Only from a live link (a remembered status may be
      * old). The step last alerted is kept, so a restart does not alert again for the same step.
+     * No polling, timer or wake-up of its own: it runs on the status the Android phone already sends over the link
+     * (at each 1 % of battery) and returns at once while the battery is above the level.
      */
     fun syncBattery() {
         if (app.linkState != BleCentral.State.CONNECTED) return
@@ -64,9 +68,14 @@ class Notifier(private val app: ClientApp) {
         val last = alertPrefs.getInt(PREF_BATTERY_STEP, -1).takeIf { it >= 0 }
         if (step == null) {
             if (last != null) { alertPrefs.edit().remove(PREF_BATTERY_STEP).apply(); nm.cancel(TAG_BATTERY, 0) }
+            batteryShown = -1
             return
         }
         val alert = BatteryAlert.shouldAlert(step, last)
+        // Status updates come for other reasons too (signal, SIMs): the notification is touched only when its level
+        // changes, so this costs nothing between them.
+        if (!alert && level == batteryShown) return
+        batteryShown = level
         if (alert) alertPrefs.edit().putInt(PREF_BATTERY_STEP, step).apply()
         val who = app.identity.peerName ?: app.getString(R.string.android_phone)
         nm.notify(TAG_BATTERY, 0, Notification.Builder(app, CH_BATTERY)
