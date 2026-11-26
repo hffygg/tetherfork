@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Android client: **conversations laid out like a phone's messaging app**:
+  - a heading for each day (Today, Yesterday, then the weekday and date) in a chip between two lines, instead of a
+    date under every text; while you scroll, the day stays pinned at the top once its heading has gone off screen;
+  - each line of a text runs in the direction of its first letter: Persian right to left, English left to right;
+  - the time beside each bubble, once for texts sent in a row in the same minute, with "Sending" or "Not delivered"
+    under it; the SIM only in conversations that used more than one SIM;
+  - an "Unread messages" line above the texts that were unread when you opened the conversation, which opens there;
+  - bubbles in a run from one side sit closer together.
+
 - Android client: **Recents grouped by day**, like a phone's own call log:
   - a heading for each day (Today, Yesterday, then the date) over a card of that day's calls;
   - on each line: the direction as an arrow (missed and declined in red, blocked crossed out), the name (red when

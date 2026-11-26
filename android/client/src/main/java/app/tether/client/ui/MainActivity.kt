@@ -355,24 +355,6 @@ class MainActivity : Activity() {
         if (picked != null) stopPicking() else @Suppress("DEPRECATION") super.onBackPressed()
     }
 
-    /** The start of [ms]'s local day (groups calls by day). */
-    private fun dayStart(ms: Long): Long = java.util.Calendar.getInstance().apply {
-        timeInMillis = ms; set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
-        set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
-    }.timeInMillis
-
-    /** "Today", "Yesterday", else the weekday and date ("Thursday, November 19"; with the year when not this year). */
-    private fun dayName(day: Long): String {
-        val today = dayStart(System.currentTimeMillis())
-        val yesterday = dayStart(today - 12 * 3600_000L)
-        if (day == today) return getString(R.string.recents_today)
-        if (day == yesterday) return getString(R.string.recents_yesterday)
-        val thisYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) ==
-            java.util.Calendar.getInstance().apply { timeInMillis = day }.get(java.util.Calendar.YEAR)
-        return android.text.format.DateUtils.formatDateTime(this, day, android.text.format.DateUtils.FORMAT_SHOW_DATE or
-            android.text.format.DateUtils.FORMAT_SHOW_WEEKDAY or if (thisYear) android.text.format.DateUtils.FORMAT_NO_YEAR else android.text.format.DateUtils.FORMAT_SHOW_YEAR)
-    }
-
     /** [a] with [f] of [b] mixed in (opaque: the list's rows sit on the page). */
     private fun mix(a: Int, b: Int, f: Float): Int {
         fun ch(s: Int) = (((a shr s) and 0xFF) * (1 - f) + ((b shr s) and 0xFF) * f).toInt() shl s
