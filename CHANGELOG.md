@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Android client: **the Messages list looks like a phone's messaging app**: a thin line between conversations; the
+  date on the right (the time today, "Yesterday", the weekday this week, else the date) and under it a round count
+  of unread texts instead of "(3)" after the name; unread conversations in bold with a brighter preview and a teal
+  date; two lines of the last text, in its own direction; a person icon for numbers that are not contacts.
+
 - Android client: **conversations laid out like a phone's messaging app**:
   - a heading for each day (Today, Yesterday, then the weekday and date) in a chip between two lines, instead of a
     date under every text; while you scroll, the day stays pinned at the top once its heading has gone off screen;

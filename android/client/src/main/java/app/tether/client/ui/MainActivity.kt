@@ -624,12 +624,73 @@ class MainActivity : Activity() {
                 .setPositiveButton(R.string.next) { _, _ -> dialable(f.text.toString()).takeIf { it.isNotEmpty() }?.let { openThread(it) } }
                 .setNegativeButton(android.R.string.cancel, null).show()
         }
-        listScreen(getString(R.string.search), compose, Rows(convs) { c ->
-            val who = s.name(c.address) ?: app.format(c.address)
-            val muted = if (s.isMuted(c.thread)) "🔕 " else ""
-            val last = (if (!c.last.let { it.box == 1 }) getString(R.string.you) + ": " else "") + c.last.body.replace('\n', ' ')
-            rowView(avatar(who, s.photo(c.address)), muted + who + if (c.unread > 0) "  (${c.unread})" else "", last.take(120), time(c.last.date), bold = c.unread > 0)
-        }, onLong = { pos -> threadMenu(convs[pos].thread, convs[pos].address) }) { pos -> openThread(convs[pos].address, convs[pos].thread) }
+        listScreen(getString(R.string.search), compose, Rows(convs) { c -> conversationRow(c, last = c === convs.lastOrNull()) }, onLong = { pos -> threadMenu(convs[pos].thread, convs[pos].address) }) { pos -> openThread(convs[pos].address, convs[pos].thread) }
+    }
+
+    /**
+     * One conversation, as phones' messaging apps list them: the picture (a person icon for a number that is not a
+     * contact), the name and two lines of the last text, the date and, under it, a round count of unread texts; unread
+     * ones in bold and brighter. A thin line under each, from the text's start.
+     */
+    private fun conversationRow(c: app.tether.client.model.Conversation, last: Boolean): View {
+        val s = app.state
+        val name = s.name(c.address)
+        val who = name ?: app.format(c.address)
+        val unread = c.unread > 0
+        val photo = s.photo(c.address)
+        val pic = if (name == null && photo == null) android.widget.ImageView(this).apply {
+            setImageDrawable(icon(R.drawable.ic_person, R.color.muted, 26)); scaleType = android.widget.ImageView.ScaleType.CENTER
+            background = round(R.color.surface, 48)
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(14) }
+        } else avatar(who, photo, 48).apply { (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(14) }
+        val preview = (if (c.last.box != 1) getString(R.string.you) + ": " else "") + c.last.body.replace('\n', ' ').take(160)
+        val line = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(12), dp(4), dp(12)); minimumHeight = dp(76)
+            addView(pic)
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(label(if (s.isMuted(c.thread)) "🔕 $who" else who, R.color.text, 16f, bold = unread).apply {
+                    setSingleLine(); ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, 0, 0, dp(2)) })
+                // The text's own direction (Persian on the right, English on the left), as in the conversation.
+                addView(label(preview, if (unread) R.color.text else R.color.muted, 14f).apply {
+                    maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, 0, 0, 0)
+                    textDirection = View.TEXT_DIRECTION_FIRST_STRONG; textAlignment = View.TEXT_ALIGNMENT_TEXT_START })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.END
+                setPaddingRelative(dp(10), 0, 0, 0)
+                addView(label(listDate(c.last.date), if (unread) R.color.accent else R.color.muted, 12f, bold = unread).apply {
+                    maxLines = 1; setPadding(0, 0, 0, 0) }, LinearLayout.LayoutParams(-2, -2))   // its own width: the column fits the date
+                if (unread) addView(label(if (c.unread > 99) "99+" else c.unread.toString(), R.color.background, 12f, bold = true).apply {
+                    gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(dp(6), 0, dp(6), 0)
+                    minWidth = dp(22); minimumWidth = dp(22); minHeight = dp(22); minimumHeight = dp(22)
+                    background = GradientDrawable().apply { cornerRadius = dp(11).toFloat(); setColor(col(R.color.accent)) }
+                }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
+            }, LinearLayout.LayoutParams(-2, -2))
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(line)
+            if (!last) addView(View(context).apply { setBackgroundColor(col(R.color.surface)) },
+                LinearLayout.LayoutParams(-1, dp(1)).apply { marginStart = dp(4 + 48 + 14) })
+            contentDescription = listOfNotNull(who, if (unread) getString(R.string.unread_n, c.unread) else null,
+                preview, listDate(c.last.date)).joinToString(", ")
+        }
+    }
+
+    /** A conversation's date: the time today, "Yesterday", the weekday this week, else the date (the year when not this one). */
+    private fun listDate(ms: Long): String {
+        val day = dayStart(ms); val today = dayStart(System.currentTimeMillis())
+        return when {
+            day == today -> android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_TIME)
+            today - day < 6 * 86_400_000L + 3_600_000L && day != dayStart(today - 12 * 3600_000L) ->
+                android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_WEEKDAY or android.text.format.DateUtils.FORMAT_ABBREV_WEEKDAY)
+            day == dayStart(today - 12 * 3600_000L) -> getString(R.string.recents_yesterday)
+            java.util.Calendar.getInstance().apply { timeInMillis = ms }.get(java.util.Calendar.YEAR) == java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) ->
+                android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_NO_YEAR or android.text.format.DateUtils.FORMAT_ABBREV_MONTH)
+            else -> android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_NUMERIC_DATE)
+        }
     }
 
     private fun threadMenu(thread: Long, address: String) {
