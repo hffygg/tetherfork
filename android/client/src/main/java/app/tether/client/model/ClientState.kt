@@ -54,6 +54,16 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
     var recents: List<CallEntry> = emptyList(); private set
     var contactsVersion = ""; private set
     val readUpTo = HashMap<Long, Long>()
+    /** Texts starred on this phone (ids; Android's message store has no star, so it stays here). */
+    val starred = HashSet<Long>()
+
+    fun isStarred(id: Long) = id in starred
+
+    /** Stars or unstars texts (by id). */
+    fun setStarred(ids: Collection<Long>, on: Boolean) {
+        if (on) starred.addAll(ids) else starred.removeAll(ids.toSet())
+        persist()
+    }
     val drafts = HashMap<String, String>()
     val threadSim = HashMap<String, Int>()
     var status: JSONObject? = null; private set
@@ -177,7 +187,9 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
 
     private fun applyDeleted(ids: List<Long>, thread: Long?) {
         val gone = ids.toHashSet()
+        if (thread != null) starred.removeAll(sms.filter { it.thread == thread }.map { it.id }.toSet())
         sms = sms.filterNot { it.id in gone || (thread != null && it.thread == thread) }
+        starred.removeAll(gone)
         if (thread != null) { readUpTo.remove(thread); fx.clearSms(thread) }
         if (ids.isNotEmpty()) {
             fx.clearSmsIds(ids)
@@ -607,7 +619,7 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
     fun wipe() {
         resetPendingIds()
         sms = emptyList(); contacts = emptyList(); recents = emptyList(); contactsVersion = ""
-        readUpTo.clear(); drafts.clear(); threadSim.clear(); status = null; lists = BlockLists(); smsSyncedUpTo = null
+        readUpTo.clear(); starred.clear(); drafts.clear(); threadSim.clear(); status = null; lists = BlockLists(); smsSyncedUpTo = null
         outbox = emptyList(); recentsSeenUpTo = null; net = null; pendingRead.clear(); pendingSms.clear(); smsIndex.clear()
         rebuildIndex(); persist()
     }
@@ -626,6 +638,7 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
         .put("recents", JSONArray(recents.map { it.json() }))
         .put("contactsVersion", contactsVersion)
         .put("readUpTo", JSONObject().apply { readUpTo.forEach { (k, v) -> put(k.toString(), v) } })
+        .put("starred", JSONArray(starred.toList()))
         .put("drafts", JSONObject(drafts as Map<*, *>))
         .put("threadSim", JSONObject(threadSim as Map<*, *>))
         .put("lists", lists.json())
@@ -642,6 +655,7 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
         recents = o.optJSONArray("recents").mapObjects(::callEntryOf)
         contactsVersion = o.optString("contactsVersion")
         o.optJSONObject("readUpTo")?.let { r -> r.keys().forEach { k -> k.toLongOrNull()?.let { readUpTo[it] = r.optLong(k) } } }
+        o.optJSONArray("starred")?.let { a -> starred.clear(); for (i in 0 until a.length()) starred += a.optLong(i) }
         o.optJSONObject("drafts")?.let { r -> r.keys().forEach { drafts[it] = r.optString(it) } }
         o.optJSONObject("threadSim")?.let { r -> r.keys().forEach { threadSim[it] = r.optInt(it) } }
         status = o.optJSONObject("status")

@@ -187,6 +187,14 @@
     <string name="recents_yesterday">دیروز</string>
     <string name="unread_messages">پیام‌های خوانده‌نشده</string>
     <string name="unread_n">%d خوانده‌نشده</string>
+    <string name="star">ستاره‌دار کردن</string>
+    <string name="unstar">برداشتن ستاره</string>
+    <string name="starred">ستاره‌دار</string>
+    <string name="select_text">انتخاب متن</string>
+    <string name="select_text_hint">روی یک کلمه نگه دارید، سپس دستگیره‌ها را بکشید تا بخشی از متن انتخاب شود.</string>
+    <string name="copy_all">کپی همه</string>
+    <string name="copied">کپی شد</string>
+    <string name="delete_texts_confirm">%d پیام روی گوشی اندروید حذف شوند؟</string>
     <string name="action_read">خوانده شد</string>
     <string name="delete_chats_confirm">%d گفتگو روی گوشی اندروید حذف شوند؟</string>
     <string name="recents_selected">%d انتخاب شده</string>

@@ -50,7 +50,7 @@ and call history. The SIM phone stays in a bag; you use the other phone.
 - **Keypad** with DTMF during calls; **Recents** grouped by day (day cards, a count for calls in a row from one number,
   a date bubble while scrolling; `model/RecentsLayout.kt`), with search, delete (one, picked calls or a whole day), clear and a missed-call badge; **Contacts** with
   Favourites (search, add, edit, star, block); **Messages** (a list with unread counts and dividers, and selecting several to mark read, mute, block or delete; conversations under a heading per day, pinned while
-  scrolling, each line in its own direction, the time beside each text, an "Unread messages" line where it opens; `model/ThreadLayout.kt`; send from either SIM, outbox while out of
+  scrolling, each line in its own direction, texts selected to copy, star or delete together (or part of one copied), the time beside each text, an "Unread messages" line where it opens; `model/ThreadLayout.kt`; send from either SIM, outbox while out of
   reach, "Not delivered" for a text whose answer was lost, read state both ways, delete, mute, block).
 - **USSD codes** (Keypad › USSD codes, or a code such as *123# sent with a call button): choose the SIM, run the code on
   the SIM phone (`ussd.send` / `ussd.result`), answer a menu (open on the SIM phone: `ussd.reply` / `ussd.cancel`;
