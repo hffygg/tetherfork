@@ -4,8 +4,9 @@ import java.util.Locale
 
 /**
  * Playout buffer for decoded far-end audio, a port of TetherCore's PlayoutBuffer (same numbers, same tests):
- * - a short shortfall is concealed (the last 10 ms faded out over ~60 ms) instead of dropping to silence and
- *   re-buffering; only ~100 ms without audio un-primes it;
+ * - a short shortfall is concealed instead of dropping to silence and re-buffering: with the decoder's own concealment
+ *   ([concealer], Opus packet-loss concealment: it continues the voice) at full level for 40 ms, then faded out; without
+ *   one, the last 10 ms repeated and faded out over ~60 ms. Only ~100 ms without audio un-primes it;
  * - the level is steered in quiet frames (inaudible): above [target] a quiet frame is written short (clock drift,
  *   bursts, the delay a gap left behind); below it, while the far clock runs measurably slow, a quiet frame is written
  *   longer. Speech is never cut or stretched: after a stall (with Bluetooth tethering on, up to ~0.9 s, its frames then
@@ -48,6 +49,27 @@ class PlayoutBuffer(rate: Int, val hiPercentile: Double = 0.998) {
     private val lastLen = (rate * 0.01).toInt()   // 10 ms
     private val last = FloatArray(lastLen)
     private var concealRun = 0
+    /**
+     * The decoder's concealment for a frame that is not there in time (playback thread; one frame of audio at this
+     * buffer's rate, or null when there is none): called while audio runs short. Null: the last 10 ms are repeated.
+     */
+    @Volatile var concealer: (() -> ShortArray?)? = null
+    private var plc = FloatArray(0)
+    private var plcPos = 0
+    private var plcFailed = false
+    /** Samples of shortfall filled by the decoder's concealment (of [concealedSamples]). */
+    @Volatile var decoderConcealedSamples = 0; private set
+
+    /** The next sample of the decoder's concealment, or null when there is none (playback thread). */
+    private fun nextPlc(): Float? {
+        if (plcPos >= plc.size) {
+            if (plcFailed) return null
+            val pcm = runCatching { concealer?.invoke() }.getOrNull()
+            if (pcm == null || pcm.isEmpty()) { plcFailed = true; return null }
+            plc = FloatArray(pcm.size) { pcm[it] / 32768f }; plcPos = 0
+        }
+        return plc[plcPos++]
+    }
 
     // Arrival statistics (decode thread only): each frame's delay against an ideal 20 ms clock, last ~10 s.
     private val delays = DoubleArray(500)
@@ -141,6 +163,7 @@ class PlayoutBuffer(rate: Int, val hiPercentile: Double = 0.998) {
                 for (i in 0 until ramp) out[i] *= i.toFloat() / ramp.toFloat()
             }
             concealRun = 0
+            plcPos = plc.size; plcFailed = false   // the next shortfall asks the decoder afresh
             remember(out, n)
             synchronized(lock) {
                 levelSum += level.toDouble(); levelPulls++
@@ -154,14 +177,23 @@ class PlayoutBuffer(rate: Int, val hiPercentile: Double = 0.998) {
         // the buffer a little (frames over Bluetooth arrive in bursts); it shrinks again after ~3 s without a gap.
         if (concealRun == 0) synchronized(lock) { target = minOf(maxTarget, target + rate / 200) }
         val fadeLen = rate.toFloat() * 0.06f
+        val hold = (rate * 0.04).toInt()   // the decoder's concealment at full level for the first 40 ms
+        var byDecoder = 0
         for (i in got until n) {
-            val g = maxOf(0f, 1 - concealRun.toFloat() / fadeLen)
-            out[i] = last[concealRun % lastLen] * g
+            val p = nextPlc()
+            if (p != null) {
+                val g = if (concealRun < hold) 1f else maxOf(0f, 1 - (concealRun - hold).toFloat() / fadeLen)
+                out[i] = p * g; byDecoder++
+            } else {
+                val g = maxOf(0f, 1 - concealRun.toFloat() / fadeLen)
+                out[i] = last[concealRun % lastLen] * g
+            }
             concealRun++
         }
         synchronized(lock) {
             levelSum += level.toDouble(); levelPulls++
             concealedSamples += n - got
+            decoderConcealedSamples += byDecoder
             cleanPulls = 0
             if (concealRun > rate / 10) {
                 // ~100 ms with nothing: really out of audio. Re-buffer a little deeper.

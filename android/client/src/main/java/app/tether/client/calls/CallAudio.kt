@@ -146,6 +146,8 @@ class CallAudio(private val send: (AudioFrame) -> Boolean, private val log: (Str
         val rate = codec?.rate ?: 16000
         playRate = rate
         val buffer = PlayoutBuffer(rate)
+        // A frame not there in time: the decoder conceals it (Opus continues the voice), not a repeat of the last 10 ms.
+        buffer.concealer = { synchronized(lock) { codec?.takeIf { it.rate == rate }?.conceal() } }
         playout = buffer
         frames = 0; lost = 0; lastArrival = 0; jitterSum = 0.0; worstGap = 0.0
         running = true
@@ -250,9 +252,9 @@ class CallAudio(private val send: (AudioFrame) -> Boolean, private val log: (Str
         val b = playout
         val ms = 1000.0 / playRate
         lastStats = String.format(Locale.ROOT, "playout delay %.0f ms (target %.0f, arrival spread asks %.0f), underruns %d, " +
-            "concealed %.0f ms (%d frames by the decoder), trimmed %.0f ms (speech %.0f ms), added %.0f ms, lost %d of %d frames, " +
+            "concealed %.0f ms (%.0f ms by the decoder's concealment, %d lost frames by it), trimmed %.0f ms (speech %.0f ms), added %.0f ms, lost %d of %d frames, " +
             "arrival jitter %.1f ms, worst gap %.0f ms, drift %.0f ppm",
-            b.meanBuffered * ms, b.target * ms, b.jitterFloor * ms, b.underruns, b.concealedSamples * ms, b.concealedFrames,
+            b.meanBuffered * ms, b.target * ms, b.jitterFloor * ms, b.underruns, b.concealedSamples * ms, b.decoderConcealedSamples * ms, b.concealedFrames,
             b.trimmed * ms, b.speechTrimmed * ms, b.inserted * ms, lost, frames, if (frames > 1) jitterSum / (frames - 1) else 0.0, worstGap, b.driftPpm)
         log("call audio: $lastStats")
     }
