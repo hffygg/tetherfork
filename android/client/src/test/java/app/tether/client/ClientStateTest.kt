@@ -299,6 +299,25 @@ class ClientStateTest {
         assertEquals("the real row replaces the placeholder", listOf(50L), s.sms.map { it.id })
     }
 
+    @Test fun sentThenDeliveredFollowsTheRealRow() {
+        s.sendSms("+10000000002", "hi", null)
+        val req = link.last(T.SMS_SEND)
+        rx(T.SMS_RESULT, JSONObject().put("ok", true).put("state", "sent"), re = req.id)
+        assertEquals("sent", s.deliveryOf(s.sms.single().id))
+        // The provider row replaces the placeholder before the delivery report comes.
+        rx(T.SMS_NEW, JSONObject().put("item", sms(50, thread = 11, addr = "+10000000002", body = "hi", date = now, box = 2, read = true).json()))
+        assertEquals("sent", s.deliveryOf(50))
+        rx(T.SMS_RESULT, JSONObject().put("ok", true).put("state", "delivered"), re = req.id)
+        assertEquals("delivered", s.deliveryOf(50))
+        s.deleteMessages(listOf(50L))
+        assertNull(s.deliveryOf(50))
+    }
+
+    @Test fun noReportNoDeliveryState() {
+        rx(T.SMS_NEW, JSONObject().put("item", sms(7, addr = "+10000000002", body = "old", date = now, box = 2, read = true).json()))
+        assertNull("texts not sent from here have no state", s.deliveryOf(7))
+    }
+
     @Test fun aFailedSendIsNotDeliveredAndSaysWhy() {
         s.sendSms("+10000000002", "x", null)
         rx(T.SMS_RESULT, JSONObject().put("ok", false).put("err", "radio off"), re = link.last(T.SMS_SEND).id)

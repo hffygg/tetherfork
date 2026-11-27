@@ -270,16 +270,21 @@ class ThreadActivity : Activity() {
             maxWidth = (resources.displayMetrics.widthPixels * 0.72).toInt()
         }
         val state = when (m.box) { 4, 6 -> getString(R.string.sending); 5 -> getString(R.string.not_delivered); else -> null }
-        val side = if (!item.showTime && state == null && !starred) null else LinearLayout(this).apply {
+        // A text sent from here: Sent (the network took it), then Delivered (the recipient's phone confirmed it).
+        val delivery = if (mine && m.box == 2) app.state.deliveryOf(m.id) else null
+        val side = if (!item.showTime && state == null && !starred && delivery == null) null else LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = if (mine) Gravity.END else Gravity.START
             setPaddingRelative(dp(if (mine) 0 else 8), 0, dp(if (mine) 8 else 0), dp(2))   // relative: the gap faces the bubble in Persian too
             if (showSim) app.state.simName(m.sub)?.let { addView(label(it, R.color.muted, 10f).apply { setPadding(0, 0, 0, 0); maxLines = 1 }) }
             if (starred) addView(android.widget.ImageView(context).apply { setImageDrawable(icon(R.drawable.ic_star, R.color.warn, 14))
                 contentDescription = getString(R.string.starred) }, LinearLayout.LayoutParams(dp(14), dp(14)).apply { bottomMargin = dp(2) })
             // Each line its own width (the column is as wide as its widest; a star alone made the time cut off).
-            if (item.showTime || state != null) addView(label(android.text.format.DateUtils.formatDateTime(context, m.date, android.text.format.DateUtils.FORMAT_SHOW_TIME), R.color.muted, 11f).apply {
+            if (item.showTime || state != null || delivery != null) addView(label(android.text.format.DateUtils.formatDateTime(context, m.date, android.text.format.DateUtils.FORMAT_SHOW_TIME), R.color.muted, 11f).apply {
                 setPadding(0, 0, 0, 0); textDirection = View.TEXT_DIRECTION_LTR }, LinearLayout.LayoutParams(-2, -2))
             state?.let { addView(label(it, if (m.box == 5) R.color.bad else R.color.muted, 11f).apply { setPadding(0, 0, 0, 0) }, LinearLayout.LayoutParams(-2, -2)) }
+            delivery?.let { d -> addView(label(getString(if (d == "delivered") R.string.sms_delivered else R.string.sms_sent),
+                if (d == "delivered") R.color.accent else R.color.muted, 11f, bold = d == "delivered").apply { setPadding(0, 0, 0, 0) },
+                LinearLayout.LayoutParams(-2, -2)) }
         }
         if (mine) side?.let { wrap.addView(it) }
         wrap.addView(body, LinearLayout.LayoutParams(-2, -2))
