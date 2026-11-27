@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Android client: the "full-screen notifications are off" warning shows only when incoming calls would ring in
+  Tether's own call screen. Calls in the Phone app ring in its own screen and never need that permission, which Android
+  may switch off again with every update installed outside the Play Store.
+
 - Android client: **see whether a text you sent arrived.** Under a text sent from this phone: "✓ Sent" when the
   network took it, then "✓✓ Delivered" (in teal) when the recipient's phone confirmed it. The SIM phone already
   forwarded both reports; the client kept only "sent", and lost track of the text once its real copy came from the SIM

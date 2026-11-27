@@ -978,9 +978,13 @@ class MainActivity : Activity() {
             }
         }
         // Calls in this app's own screen ring through a full-screen notification: from Android 14 that wakes the screen
-        // only with "Full screen notifications" allowed for the app.
+        // only with "Full screen notifications" allowed for the app. Calls in the Phone app ring in the Phone app's own
+        // screen and need no such permission, so it is asked for only while calls would come to this app's own screen
+        // (the setting off, or no calling account on). Android may switch it off again when an update is installed
+        // outside the Play Store; with the Phone app in use, that no longer matters.
         val nm = getSystemService(android.app.NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 34 && !nm.canUseFullScreenIntent()) {
+        val ownScreen = !t.usePhoneApp || t.phoneAccounts().none { it.second }
+        if (Build.VERSION.SDK_INT >= 34 && ownScreen && !nm.canUseFullScreenIntent()) {
             c.addView(label(getString(R.string.full_screen_off), R.color.warn, 13f).apply { setPadding(0, dp(10), 0, dp(2)) })
             c.addView(button(getString(R.string.full_screen_allow), Look.OUTLINED) {
                 runCatching { startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))) }
