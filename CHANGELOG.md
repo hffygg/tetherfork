@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Android client: **see whether a text you sent arrived.** Under a text sent from this phone: "✓ Sent" when the
+  network took it, then "✓✓ Delivered" (in teal) when the recipient's phone confirmed it. The SIM phone already
+  forwarded both reports; the client kept only "sent", and lost track of the text once its real copy came from the SIM
+  phone, which happens before the delivery report. Networks that send no delivery reports leave it at "Sent".
+
 ## 1.3.2 — 2026-11-27
 
 - Android client: **smoother call sound when the link hiccups.** A frame from the SIM phone that is not there in time

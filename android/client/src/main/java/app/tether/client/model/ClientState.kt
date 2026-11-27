@@ -29,6 +29,9 @@ interface Effects {
     fun now(): Long = System.currentTimeMillis()
 }
 
+/** How many texts' sent / delivered states are kept (the newest). */
+private const val MAX_DELIVERY_IDS = 5000
+
 /** A problem to show the user; [kind] is translated by the UI, [detail] comes from the Android phone as is. */
 data class Problem(val kind: String, val detail: String? = null) {
     companion object {
@@ -56,6 +59,14 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
     val readUpTo = HashMap<Long, Long>()
     /** Texts starred on this phone (ids; Android's message store has no star, so it stays here). */
     val starred = HashSet<Long>()
+    /** Texts sent from here that the network took ("sent") and texts whose delivery report came ("delivered"), by id. */
+    private val awaitingReport = LinkedHashSet<Long>()
+    private val deliveredIds = LinkedHashSet<Long>()
+
+    /** What became of a text sent from here: "delivered" (the recipient's phone confirmed it), "sent", or null (unknown). */
+    fun deliveryOf(id: Long): String? = when (id) { in deliveredIds -> "delivered"; in awaitingReport -> "sent"; else -> null }
+
+    private fun keepRecent(set: LinkedHashSet<Long>) { while (set.size > MAX_DELIVERY_IDS) set.remove(set.first()) }
 
     fun isStarred(id: Long) = id in starred
 
@@ -187,9 +198,10 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
 
     private fun applyDeleted(ids: List<Long>, thread: Long?) {
         val gone = ids.toHashSet()
-        if (thread != null) starred.removeAll(sms.filter { it.thread == thread }.map { it.id }.toSet())
+        if (thread != null) sms.filter { it.thread == thread }.map { it.id }.toSet().let { ids ->
+            starred.removeAll(ids); awaitingReport.removeAll(ids); deliveredIds.removeAll(ids) }
         sms = sms.filterNot { it.id in gone || (thread != null && it.thread == thread) }
-        starred.removeAll(gone)
+        starred.removeAll(gone); awaitingReport.removeAll(gone); deliveredIds.removeAll(gone)
         if (thread != null) { readUpTo.remove(thread); fx.clearSms(thread) }
         if (ids.isNotEmpty()) {
             fx.clearSmsIds(ids)
@@ -454,8 +466,15 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
                 val p = re?.let { pendingSms[it] }
                 if (p != null) {
                     val ok = b.optBoolean("ok")
+                    val state = b.optString("state")
+                    // "delivered" comes after "sent" (if the network sends delivery reports): the text is already sent.
                     sms = sms.map { if (it.id == p) it.copy(box = if (ok) 2 else 5) else it }
-                    if (b.optString("state") != "sent") pendingSms.remove(re)
+                    when {
+                        !ok -> { awaitingReport.remove(p); deliveredIds.remove(p) }
+                        state == "delivered" -> { awaitingReport.remove(p); deliveredIds += p; keepRecent(deliveredIds) }
+                        else -> { awaitingReport += p; keepRecent(awaitingReport) }
+                    }
+                    if (state != "sent") pendingSms.remove(re)
                     if (!ok) problem = Problem(Problem.NOT_SENT, b.optStringOrNull("err"))
                     persist()
                 }
@@ -586,7 +605,10 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
                 val real = outgoing.firstOrNull { it.date >= p.date - 120_000 && numberKey(it.addr) == numberKey(p.addr) && it.body == p.body } ?: continue
                 confirmed += p.id
                 if (p.thread != real.thread) onThreadMoved?.invoke(p.thread, real.thread)
-                pendingSms.entries.removeAll { it.value == p.id }
+                // A delivery report may still come for it: it now belongs to the real row.
+                pendingSms.entries.forEach { if (it.value == p.id) it.setValue(real.id) }
+                if (awaitingReport.remove(p.id)) awaitingReport += real.id
+                if (deliveredIds.remove(p.id)) deliveredIds += real.id
             }
             if (confirmed.isNotEmpty()) arr.removeAll { it.id in confirmed }
             smsIndex.clear()
@@ -619,7 +641,7 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
     fun wipe() {
         resetPendingIds()
         sms = emptyList(); contacts = emptyList(); recents = emptyList(); contactsVersion = ""
-        readUpTo.clear(); starred.clear(); drafts.clear(); threadSim.clear(); status = null; lists = BlockLists(); smsSyncedUpTo = null
+        readUpTo.clear(); starred.clear(); awaitingReport.clear(); deliveredIds.clear(); drafts.clear(); threadSim.clear(); status = null; lists = BlockLists(); smsSyncedUpTo = null
         outbox = emptyList(); recentsSeenUpTo = null; net = null; pendingRead.clear(); pendingSms.clear(); smsIndex.clear()
         rebuildIndex(); persist()
     }
@@ -639,6 +661,8 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
         .put("contactsVersion", contactsVersion)
         .put("readUpTo", JSONObject().apply { readUpTo.forEach { (k, v) -> put(k.toString(), v) } })
         .put("starred", JSONArray(starred.toList()))
+        .put("sentIds", JSONArray(awaitingReport.toList()))
+        .put("deliveredIds", JSONArray(deliveredIds.toList()))
         .put("drafts", JSONObject(drafts as Map<*, *>))
         .put("threadSim", JSONObject(threadSim as Map<*, *>))
         .put("lists", lists.json())
@@ -655,6 +679,8 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
         recents = o.optJSONArray("recents").mapObjects(::callEntryOf)
         contactsVersion = o.optString("contactsVersion")
         o.optJSONObject("readUpTo")?.let { r -> r.keys().forEach { k -> k.toLongOrNull()?.let { readUpTo[it] = r.optLong(k) } } }
+        o.optJSONArray("sentIds")?.let { a -> awaitingReport.clear(); for (i in 0 until a.length()) awaitingReport += a.optLong(i) }
+        o.optJSONArray("deliveredIds")?.let { a -> deliveredIds.clear(); for (i in 0 until a.length()) deliveredIds += a.optLong(i) }
         o.optJSONArray("starred")?.let { a -> starred.clear(); for (i in 0 until a.length()) starred += a.optLong(i) }
         o.optJSONObject("drafts")?.let { r -> r.keys().forEach { drafts[it] = r.optString(it) } }
         o.optJSONObject("threadSim")?.let { r -> r.keys().forEach { threadSim[it] = r.optInt(it) } }

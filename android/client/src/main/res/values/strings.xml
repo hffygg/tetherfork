@@ -188,6 +188,8 @@
     <string name="recents_yesterday">Yesterday</string>
     <string name="unread_messages">Unread messages</string>
     <string name="unread_n">%d unread</string>
+    <string name="sms_sent">✓ Sent</string>
+    <string name="sms_delivered">✓✓ Delivered</string>
     <string name="star">Star</string>
     <string name="unstar">Unstar</string>
     <string name="starred">Starred</string>
