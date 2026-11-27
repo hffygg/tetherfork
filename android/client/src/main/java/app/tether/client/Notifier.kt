@@ -65,7 +65,7 @@ class Notifier(private val app: ClientApp) {
         val step = BatteryAlert.step(level, st.optBoolean("charging"), batteryAlert)
         val last = alertPrefs.getInt(PREF_BATTERY_STEP, -1).takeIf { it >= 0 }
         if (step == null) {
-            if (last != null) { alertPrefs.edit().remove(PREF_BATTERY_STEP).apply(); nm.cancel(TAG_BATTERY, 0) }
+            if (last != null) { alertPrefs.edit().remove(PREF_BATTERY_STEP).apply(); nm.cancel(TAG_BATTERY, 0); nm.cancel(TAG_BATTERY, 1) }
             return
         }
         // Posted only at a new 5 % step (it shows the level at that moment); in between nothing changes, so it costs
@@ -73,6 +73,16 @@ class Notifier(private val app: ClientApp) {
         if (!BatteryAlert.shouldAlert(step, last)) return
         alertPrefs.edit().putInt(PREF_BATTERY_STEP, step).apply()
         val who = app.identity.peerName ?: app.getString(R.string.android_phone)
+        // The group's summary: Android 15+ folds a group without one (a "sparse" group) into the app's bundle with the
+        // texts; with a summary the group stays apart, shown as one card (a group of one shows only its child).
+        nm.notify(TAG_BATTERY, 1, Notification.Builder(app, CH_BATTERY)
+            .setSmallIcon(R.drawable.ic_battery_alert)
+            .setColor(app.getColor(R.color.bad))
+            .setContentTitle(app.getString(R.string.battery_low_title, who, level))
+            .setGroup(GROUP_BATTERY).setGroupSummary(true)
+            .setGroupAlertBehavior(Notification.GROUP_ALERT_CHILDREN)
+            .setAutoCancel(true)
+            .build())
         nm.notify(TAG_BATTERY, 0, Notification.Builder(app, CH_BATTERY)
             .setSmallIcon(R.drawable.ic_battery_alert)
             .setColor(app.getColor(R.color.bad))
@@ -80,8 +90,8 @@ class Notifier(private val app: ClientApp) {
             .setContentText(app.getString(R.string.battery_low_text, batteryAlert))
             .setContentIntent(pi(Intent(app, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.TAB_LINK), 3))
             .setCategory(Notification.CATEGORY_STATUS)
-            // Its own group: Android bundles an app's ungrouped notifications together, which put it among the texts.
-            .setGroup(GROUP_BATTERY)
+            // Its own group (with the summary above): Android bundles an app's ungrouped notifications together.
+            .setGroup(GROUP_BATTERY).setGroupAlertBehavior(Notification.GROUP_ALERT_CHILDREN)
             .setAutoCancel(true)
             .build())
     }
