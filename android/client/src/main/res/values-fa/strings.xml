@@ -190,6 +190,10 @@
     <string name="star">ستاره‌دار کردن</string>
     <string name="unstar">برداشتن ستاره</string>
     <string name="starred">ستاره‌دار</string>
+    <string name="starred_messages">پیام‌های ستاره‌دار</string>
+    <string name="search_starred">جستجو در ستاره‌دارها</string>
+    <string name="starred_empty">هنوز پیام ستاره‌داری نیست. در یک گفتگو روی پیامی نگه دارید و ☆ را بزنید.</string>
+    <string name="back">بازگشت</string>
     <string name="select_text">انتخاب متن</string>
     <string name="select_text_hint">روی یک کلمه نگه دارید، سپس دستگیره‌ها را بکشید تا بخشی از متن انتخاب شود.</string>
     <string name="copy_all">کپی همه</string>

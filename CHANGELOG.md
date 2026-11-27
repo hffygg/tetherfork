@@ -7,6 +7,9 @@
   With one selected: Select text, to copy part of it (also by holding the selected text again, as Telegram does),
   and Send again for a text that was not delivered. Starred texts show a star by their time; stars are kept on this
   phone. Back or ✕ stops selecting. This replaces the Copy / Delete menu.
+- Android client: **Starred messages**. A gold star beside the search field on the Messages tab opens the chats that
+  have starred texts (how many, and the newest one); tap a chat for its starred texts, newest first; tap a text to open
+  it in its conversation (scrolled to it and lit for a moment), hold it to unstar or copy. Both lists can be searched.
 
 - Android client: **low-battery alert for the SIM phone**. Link › Low battery alert (off, or 10 % to 50 %; 20 % by
   default): when the SIM phone is not charging and its battery falls to that level, a notification says so, and it

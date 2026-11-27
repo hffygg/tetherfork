@@ -625,9 +625,14 @@ class MainActivity : Activity() {
                 .setPositiveButton(R.string.next) { _, _ -> dialable(f.text.toString()).takeIf { it.isNotEmpty() }?.let { openThread(it) } }
                 .setNegativeButton(android.R.string.cancel, null).show()
         }
+        // Beside the search field: the starred texts (gold), then New message (the pen).
+        val star = iconButton(R.drawable.ic_star_border, getString(R.string.starred_messages), R.color.warn) {
+            startActivity(Intent(this, StarredActivity::class.java))
+        }
+        val tools = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; addView(star); addView(compose) }
         // Conversations deleted meanwhile are no longer picked.
         pickedChats?.retainAll(s.conversations.mapTo(HashSet()) { it.thread })
-        listScreen(getString(R.string.search), compose, Rows(convs) { c -> conversationRow(c, last = c === convs.lastOrNull()) }, onLong = { pos ->
+        listScreen(getString(R.string.search), tools, Rows(convs) { c -> conversationRow(c, last = c === convs.lastOrNull()) }, onLong = { pos ->
             // A long press starts picking conversations; the actions for them come in a bar above the list.
             if (pickedChats == null) pickedChats = LinkedHashSet()
             toggleChat(convs[pos].thread)
@@ -779,19 +784,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** A conversation's date: the time today, "Yesterday", the weekday this week, else the date (the year when not this one). */
-    private fun listDate(ms: Long): String {
-        val day = dayStart(ms); val today = dayStart(System.currentTimeMillis())
-        return when {
-            day == today -> android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_TIME)
-            today - day < 6 * 86_400_000L + 3_600_000L && day != dayStart(today - 12 * 3600_000L) ->
-                android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_WEEKDAY or android.text.format.DateUtils.FORMAT_ABBREV_WEEKDAY)
-            day == dayStart(today - 12 * 3600_000L) -> getString(R.string.recents_yesterday)
-            java.util.Calendar.getInstance().apply { timeInMillis = ms }.get(java.util.Calendar.YEAR) == java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) ->
-                android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_NO_YEAR or android.text.format.DateUtils.FORMAT_ABBREV_MONTH)
-            else -> android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_NUMERIC_DATE)
-        }
-    }
 
 
     private fun openThread(address: String, thread: Long? = null) {

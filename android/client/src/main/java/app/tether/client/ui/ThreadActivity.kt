@@ -48,12 +48,15 @@ class ThreadActivity : Activity() {
     /** The selected texts (ids), or null when not selecting. */
     private var picked: LinkedHashSet<Long>? = null
     private var backCb: Any? = null
+    /** A text to show when the conversation opens (from the Starred screen): scrolled to and briefly lit. */
+    private var focus: Long? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         address = intent.getStringExtra(EXTRA_ADDRESS) ?: run { finish(); return }
         thread = intent.getLongExtra(EXTRA_THREAD, Long.MIN_VALUE).takeIf { it != Long.MIN_VALUE } ?: app.state.threadFor(address) ?: Long.MIN_VALUE
         sub = app.state.preferredSim(address)
+        focus = intent.getLongExtra(EXTRA_FOCUS, Long.MIN_VALUE).takeIf { it != Long.MIN_VALUE }
         // A text sent into a new conversation gets its real thread id with the provider row: follow it.
         app.state.onThreadMoved = { from, to -> if (from == thread) thread = to }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(col(R.color.background)) }
@@ -150,7 +153,12 @@ class ThreadActivity : Activity() {
         selectionBar(msgs)
         val unreadAt = items.indexOf(ThreadLayout.Item.Unread)
         // Opened with unread texts: at the line (the older ones above it); else, and as new texts come, at the end.
-        if (first && unreadAt >= 0) list.setSelectionFromTop(unreadAt, dp(8))
+        val focusAt = focus?.let { f -> items.indexOfFirst { it is ThreadLayout.Item.Msg && it.sms.id == f } } ?: -1
+        if (first && focusAt >= 0) {
+            list.setSelectionFromTop(focusAt, resources.displayMetrics.heightPixels / 4)
+            // Lit for a moment, then as the others.
+            list.postDelayed({ focus = null; render() }, 1600)
+        } else if (first && unreadAt >= 0) list.setSelectionFromTop(unreadAt, dp(8))
         else if (atEnd || msgs.size != lastCount) list.setSelection(items.size - 1)
         lastCount = msgs.size
         list.post { updatePinned() }
@@ -223,6 +231,7 @@ class ThreadActivity : Activity() {
             setPadding(dp(12), dp(if (item.startsRun) 8 else 2), dp(12), dp(2))
             // Selected: the whole row tinted, as Telegram does.
             if (isPicked) setBackgroundColor(android.content.res.ColorStateList.valueOf(col(R.color.accent)).withAlpha(0x26).defaultColor)
+            else if (m.id == focus) setBackgroundColor(android.content.res.ColorStateList.valueOf(col(R.color.warn)).withAlpha(0x2E).defaultColor)
             setOnLongClickListener { performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); onLong(m); true }
             setOnClickListener { if (picked != null) toggle(m.id) }
         }
@@ -402,5 +411,5 @@ class ThreadActivity : Activity() {
         }.show()
     }
 
-    companion object { private const val PIN_TOP = 0; private const val HEADING_TOP = 18; const val EXTRA_ADDRESS = "address"; const val EXTRA_THREAD = "thread" }
+    companion object { private const val PIN_TOP = 0; private const val HEADING_TOP = 18; const val EXTRA_ADDRESS = "address"; const val EXTRA_THREAD = "thread"; const val EXTRA_FOCUS = "focus" }
 }
