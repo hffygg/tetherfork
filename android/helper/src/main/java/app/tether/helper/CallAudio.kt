@@ -73,10 +73,22 @@ object CallAudio {
         else -> emptyList()
     }
     val injectMethods: List<String> get() = when {
-        Build.VERSION.SDK_INT >= FULL_SDK_AUDIO -> listOf("intercept", "telephony_tx", "policy_mix")
+        Build.VERSION.SDK_INT >= FULL_SDK_AUDIO -> UplinkRoutes.injectOrder(listOf("intercept", "telephony_tx", "policy_mix"), interceptInjectDead)
         Build.VERSION.SDK_INT >= MIN_SDK_AUDIO -> listOf("telephony_tx")
         else -> emptyList()
     }
+
+    /**
+     * The interception API's uplink track goes nowhere on this phone (Qualcomm, no `afe-proxy-playback` mixer path:
+     * [UplinkRoutes]), so it is never used to inject; read once from the vendor's mixer configuration.
+     */
+    val interceptInjectDead: Boolean by lazy {
+        (silence == Silence.QUALCOMM || silence == Silence.SAMSUNG_QUALCOMM) && UplinkRoutes.afeProxyMissing(readMixerPaths())
+    }
+
+    private fun readMixerPaths(): List<String> = listOf("/vendor/etc", "/vendor/etc/audio", "/odm/etc", "/odm/etc/audio")
+        .flatMap { d -> java.io.File(d).listFiles { f -> f.name.startsWith("mixer_paths") && f.name.endsWith(".xml") }?.toList().orEmpty() }
+        .mapNotNull { f -> runCatching { f.readText() }.getOrNull() }
 
     private val am get() = ShellEnv.audioManager
 
@@ -460,11 +472,13 @@ object CallAudio {
      * [vendorMicKeys]: the vendor has its own microphone key, which mutes the microphone at its source (used
      * automatically, never Android's mic mute); [voiceStream]: the earpiece is silenced by muting the voice-call stream
      * (the HAL's Rx device mute); [blindSafe]: the mic key is known to keep the injected uplink, so it stays on where the
-     * uplink cannot be checked.
+     * uplink cannot be checked; [telecomMuteKillsUplink]: Android's mic mute silences the injected uplink too (by the
+     * vendor's HAL source), so it is never used there, whatever an uplink check says: on a Qualcomm phone (Redmi Note 8,
+     * trinket, 2026-11-25) VOICE_UPLINK still heard the iPhone with the mute on while the far end heard nothing.
      */
-    enum class Silence(val vendorMicKeys: Boolean, val voiceStream: Boolean, val blindSafe: Boolean) {
-        SAMSUNG(true, false, true), SAMSUNG_QUALCOMM(false, true, false), QUALCOMM(false, true, false),
-        MEDIATEK(true, false, false), OTHER(false, true, false)
+    enum class Silence(val vendorMicKeys: Boolean, val voiceStream: Boolean, val blindSafe: Boolean, val telecomMuteKillsUplink: Boolean) {
+        SAMSUNG(true, false, true, false), SAMSUNG_QUALCOMM(false, true, false, true), QUALCOMM(false, true, false, true),
+        MEDIATEK(true, false, false, true), OTHER(false, true, false, false)
     }
 
     /** Overridable for tests on one phone (`TETHER_SILENCE=qualcomm|mediatek|other|samsung` in the helper's environment). */

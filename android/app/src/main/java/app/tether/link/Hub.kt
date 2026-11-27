@@ -30,6 +30,7 @@ import app.tether.data.UssdDialer
 import app.tether.telecom.FindPhone
 import app.tether.telecom.RingerControl
 import app.tether.telecom.CallRegistry
+import app.tether.helper.CallAudio
 import app.tether.helper.LocalMutes
 import app.tether.helper.MicPath
 import org.json.JSONArray
@@ -823,8 +824,9 @@ class Hub(private val app: TetherApp) : ConnectionListener {
                     chosen?.let { app.prefs.edit().putString("inject", it).apply() }
                     val rows = JSONArray().put(path)
                     r.optJSONArray("methods")?.let { a -> for (i in 0 until a.length()) rows.put(a.get(i)) }
-                    // The tone reached the uplink without any local mute: does it with the phone's mic muted too?
-                    if (chosen != null) muteRow(chosen, r.optBoolean("micByTelecom"))?.let { rows.put(it) }
+                    // The tone reached the uplink without any local mute: does it with the phone's mic muted too? (Not where
+                    // every mic mute this phone has also mutes the injected voice: VOICE_UPLINK may still show it there.)
+                    if (chosen != null && LocalMutes.canMute(CallAudio.silence)) muteRow(chosen, r.optBoolean("micByTelecom"))?.let { rows.put(it) }
                     r.put("methods", rows)
                     // A capture method heard the call: this firmware gives call audio after all.
                     val heard = (0 until rows.length()).any { i -> rows.optJSONObject(i)?.let { it.optString("name").startsWith("capture:") && it.optBoolean("ok") } == true }
@@ -1003,11 +1005,16 @@ class Hub(private val app: TetherApp) : ConnectionListener {
         }
 
         /**
-         * Changed on this phone or from a client: a new choice also forgets what earlier checks found, so all is tried anew
-         * ([forget] false: kept, for the debug hook's tests on the test line, which remember nothing themselves).
+         * Changed on this phone or from a client. A new choice forgets what the mute's check found; what the redirect modes
+         * did is kept when only switching between settings (each retry of a mode that breaks the downlink cost a few
+         * seconds of silence and a late uplink for the rest of that call: Redmi Note 8, 2026-11-25) and forgotten only when
+         * the setting already chosen is chosen again ("Choose this again to try anew") or by a self-test's new answer.
+         * [forget] false: all kept, for the debug hook's tests on the test line, which remember nothing themselves.
          */
         fun setMic(setting: MicPath.Setting, forget: Boolean = true) {
-            app.prefs.edit().putString(PREF_MIC, setting.wire).remove(PREF_MIC_MUTE).apply { if (forget) remove(memoryKey).remove(redirectKey) }.apply()
+            val again = setting == mic
+            app.prefs.edit().putString(PREF_MIC, setting.wire).remove(PREF_MIC_MUTE)
+                .apply { if (forget) remove(memoryKey); if (forget && again) remove(redirectKey) }.apply()
             if (forget) helper.forgetAudioBlocked()
             LinkLog.add("call audio: the phone's own mic during bridged calls: ${setting.wire}")
             if (running) helper.local(setting.wire, LocalMutes.wantMicMute(setting == MicPath.Setting.MUTE, memory()), LocalMutes.wantCheck(memory()),
@@ -1035,14 +1042,14 @@ class Hub(private val app: TetherApp) : ConnectionListener {
             val capture = info?.optString("capture")?.takeIf { it.isNotEmpty() && it != "null" }
             return JSONObject().put("name", "call-audio").put("ok", running && inject != null).put("note",
                 if (!running || info == null) "this call's audio was not bridged" else
-                    "inject=${inject ?: "NONE"} capture=${capture ?: "NONE"}; ${CallAudioReport.micLine(helper.lastUplink, micSetting, memory(), helper.lastMic)}; " +
+                    "inject=${inject ?: "NONE"} capture=${capture ?: "NONE"}; ${CallAudioReport.micLine(helper.lastUplink, micSetting, memory(), helper.lastMic, LocalMutes.canMute(CallAudio.silence))}; " +
                         "the tests below run with the phone's mic unmuted and the call in its own mode, except the mic rows")
         }
 
         /** The helper's start INFO for a call: one link-log line saying whether the uplink injection opened. */
         fun onHelperInfo(o: JSONObject) {
             infoAt = SystemClock.elapsedRealtime()
-            if (running) LinkLog.add(CallAudioReport.pathLine(o, micSetting, memory()))
+            if (running) LinkLog.add(CallAudioReport.pathLine(o, micSetting, memory(), LocalMutes.canMute(CallAudio.silence)))
         }
 
         /** A path-watch finding (the downlink delivering nothing, the injection not taken): straight into the link log. */

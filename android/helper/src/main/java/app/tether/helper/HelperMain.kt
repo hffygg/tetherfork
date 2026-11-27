@@ -332,7 +332,7 @@ object HelperMain {
             val errors = JSONArray()
             if (android.os.Build.VERSION.SDK_INT < CallAudio.MIN_SDK_AUDIO) errors.put("call audio is not available: it needs Android 11 or later")
             val capOrder = cfg.optString("capture", "auto").let { if (it == "auto") CallAudio.captureMethods else listOf(it) }
-            val injOrder = cfg.optString("inject", "auto").let { if (it == "auto") CallAudio.injectMethods else listOf(it) }
+            val injOrder = UplinkRoutes.fixedOrAuto(cfg.optString("inject", "auto"), CallAudio.injectMethods)
             val injectMs = cfg.optInt("injectMs", 40)
             startId = cfg.opt("id") ?: JSONObject.NULL
             callActive = cfg.optBoolean("active", true)
@@ -395,6 +395,7 @@ object HelperMain {
                     val routedCall = inj?.let { CallAudio.routedToCall(it.routedType(), testLine) }
                     info(JSONObject().put("id", startId).put("capture", cap?.name ?: JSONObject.NULL).put("inject", inj?.name ?: JSONObject.NULL)
                         .put("testLineFarEnd", farEnd).put("routed", inj?.routedTo() ?: JSONObject.NULL).put("routedToCall", routedCall ?: JSONObject.NULL)
+                        .put("interceptInjectDead", CallAudio.interceptInjectDead)
                         .put("openWaitMs", stats.openWaitMs).put("openMode", MicPath.Mode.name(CallAudio.audioMode())).put("active", callActive)
                         .put("earpiece", localNote).put("silent", LocalMutes.silent(plan, localOk, guard?.state == RedirectGuard.State.ON))
                         .put("mic", micJson())

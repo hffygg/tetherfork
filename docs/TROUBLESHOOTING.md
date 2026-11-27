@@ -101,14 +101,30 @@ iPhone. The iPhone's voice is injected into the call's uplink by the Android pho
   (Android 13+; the phone's own microphone and earpiece leave the call), then the phone maker's own microphone switch
   (Samsung, MediaTek), and otherwise leaves the microphone on. It never uses Android's general microphone mute on its
   own: on several phones that also mutes your voice. Each step is checked during the call: when the downlink goes
-  silent, or your speech stops reaching the uplink, Tether undoes it and remembers that for the phone model. Some
+  silent, or your speech stops reaching the uplink, Tether undoes it and remembers that for the phone model (switching
+  to another setting and back keeps that; choosing **Off during calls** again while it is chosen, or the self-test,
+  tries the redirect modes anew). Some
   phones cannot show their uplink to this check: a redirect mode is then not used at all (not even for the rest of that
   call, and no other untested mode is tried after it), and the maker's switch is
   kept only where it is known to keep your voice (Samsung's, verified on real calls); otherwise the microphone stays
   on rather than risk a silent call.
+- **A route into the call that the phone's audio configuration does not wire up.** On some Qualcomm phones (seen
+  on a Redmi Note 8 with a custom Android 16) the interception API's uplink plays into a mixer path that does not
+  exist, so the other side hears only the Android phone's own microphone (you are heard only when it lies close).
+  Tether detects this from the vendor's mixer configuration and sends your voice through the in-call music route
+  instead; the `call audio path:` line then says `via telephony_tx (… not via intercept: this phone's audio
+  configuration has no afe-proxy-playback path …)`. The self-test cannot see this case: put the Android phone in
+  another room and check that the other side still hears you.
 - **The Android phone's microphone mute** (only with **Muted**). On several phones (MediaTek for certain, Qualcomm
-  audio systems) muting the phone's microphone also mutes the injected voice. Tether checks during each call, turns the
-  mute off when your voice does not get through and remembers it.
+  audio systems) muting the phone's microphone also mutes the injected voice. Where the phone maker has its own
+  microphone switch Tether uses that; on Qualcomm phones without one (Xiaomi, Redmi, Poco, OnePlus, Samsung with a
+  Qualcomm chip and others) Android's microphone mute is never used, since the uplink check could not see that it
+  silences your voice: the microphone stays on and the Android app says so under **Muted**. Elsewhere Tether checks
+  during each call, turns the mute off when your voice does not get through and remembers it.
+- **The iPhone app lost its CallKit registration** (before 1.2.5): calls dialed on the iPhone
+  end at once and incoming calls ring but stay silent both ways until Tether is force-quit. iOS had restarted its
+  call service under the running app. Versions from 1.2.5 on set CallKit up again by themselves (`CallKit: … provider
+  set up again` in the iPhone's link log); with an older one, swipe Tether away in the app switcher and open it again.
 - **The iPhone sends silence**: Tether may not use the iPhone's microphone (Settings › Privacy & Security ›
   Microphone), or the call is muted on the iPhone. Tether asks for the microphone once it is paired; if that was
   refused, the call screen says so in yellow, the Link tab in red (**Your voice in the call** then reads "Does not

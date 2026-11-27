@@ -119,9 +119,10 @@ what you see (open an issue with your phone model, Android version and the Link 
 | --- | --- |
 | Samsung Galaxy A54, Android 17 (One UI) as the SIM phone | **Tested** upstream (with an iPhone client), including call audio |
 | Tether Client on a second Android phone | Tested on the JVM against a simulated SIM phone; not yet on a second phone |
+| Redmi Note 8 (Qualcomm, custom Android 16) + iPhone 17 Pro (user report, #18) | Calls, texts and call audio work (uplink injected via in-call music `telephony_tx`; phone's microphone stays on) |
 | Other Samsung phones, Android 13+ | Expected to work like the A54, including taking the phone's own microphone and earpiece out of a bridged call (redirect audio mode, checked during each call; see [Troubleshooting](docs/TROUBLESHOOTING.md#the-other-side-cannot-hear-me)) |
 | Other Android 13+ phones | Calls, messages, contacts and switches expected to work. Call audio works only if the build lets the shell user use the call-audio interception API; the phone's own earpiece is muted during a bridged call (voice-call stream, or each vendor's own audio controls; from their sources, untested on devices; the Link tab shows "Android phone silent"); its microphone is taken out of the call with Android's redirect audio mode where the phone allows it (checked during each call and by the self-test), else it stays on |
-| Samsung Galaxy A73 5G, Android 16 (user report, #13) | Calls, texts and switches work. Up to 1.2.3, Tether's Samsung call keys and redirect mode left this Qualcomm phone's call audio stuck (no audio even in its own calls until a reboot); 1.2.4 uses neither on Samsung's Qualcomm phones. Call audio with 1.2.4 is being tested |
+| Samsung Galaxy A73 5G, Android 16 (user report, #13) | Calls, texts, switches and two-way call audio work (since 1.2.4, via `capture:intercept` and `inject:telephony_tx`); silencing the A73's own earpiece during a call is still open |
 | Android 11-12 | Everything, with call audio on a best-effort path (voice-call capture); untested |
 | Android 10 | Everything except call audio; the helper needs the TCP adb path; untested |
 | Android 8-9 | Everything except call audio; link over GATT only; the helper only via TCP adb; tested in the emulator, untested on devices |
