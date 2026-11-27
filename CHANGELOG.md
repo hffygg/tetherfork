@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.3.2 — 2026-11-27
+
 - Android client: **smoother call sound when the link hiccups.** A frame from the SIM phone that is not there in time
   (Bluetooth sometimes delivers one late) is now filled by the Opus decoder's own concealment, which continues the
   voice, at full level for 40 ms and then faded, instead of repeating the last 10 ms while fading out (a short, audible
