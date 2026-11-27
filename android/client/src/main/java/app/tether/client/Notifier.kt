@@ -45,8 +45,6 @@ class Notifier(private val app: ClientApp) {
     // ------------------------------------------------------------------ the Android phone's battery
 
     private val alertPrefs = app.getSharedPreferences("alerts", Context.MODE_PRIVATE)
-    /** The level the battery notification shows now (-1: none shown since this process started). */
-    private var batteryShown = -1
 
     /** The low-battery alert level for the Android phone (0 = off). */
     var batteryAlert: Int
@@ -54,8 +52,8 @@ class Notifier(private val app: ClientApp) {
         set(v) { alertPrefs.edit().putInt(PREF_BATTERY, v).remove(PREF_BATTERY_STEP).apply(); syncBattery() }
 
     /**
-     * Low battery on the Android phone: a notification at the chosen level and again (it alerts once more) at every
-     * 5 % below it; gone when it charges or rises above the level. Only from a live link (a remembered status may be
+     * Low battery on the Android phone: a notification at the chosen level and again at every 5 % below it (only then:
+     * it shows the level at that step and does not change in between); gone when it charges or rises above the level. Only from a live link (a remembered status may be
      * old). The step last alerted is kept, so a restart does not alert again for the same step.
      * No polling, timer or wake-up of its own: it runs on the status the Android phone already sends over the link
      * (at each 1 % of battery) and returns at once while the battery is above the level.
@@ -68,15 +66,12 @@ class Notifier(private val app: ClientApp) {
         val last = alertPrefs.getInt(PREF_BATTERY_STEP, -1).takeIf { it >= 0 }
         if (step == null) {
             if (last != null) { alertPrefs.edit().remove(PREF_BATTERY_STEP).apply(); nm.cancel(TAG_BATTERY, 0) }
-            batteryShown = -1
             return
         }
-        val alert = BatteryAlert.shouldAlert(step, last)
-        // Status updates come for other reasons too (signal, SIMs): the notification is touched only when its level
-        // changes, so this costs nothing between them.
-        if (!alert && level == batteryShown) return
-        batteryShown = level
-        if (alert) alertPrefs.edit().putInt(PREF_BATTERY_STEP, step).apply()
+        // Posted only at a new 5 % step (it shows the level at that moment); in between nothing changes, so it costs
+        // nothing between steps and does not tick through every percent.
+        if (!BatteryAlert.shouldAlert(step, last)) return
+        alertPrefs.edit().putInt(PREF_BATTERY_STEP, step).apply()
         val who = app.identity.peerName ?: app.getString(R.string.android_phone)
         nm.notify(TAG_BATTERY, 0, Notification.Builder(app, CH_BATTERY)
             .setSmallIcon(R.drawable.ic_battery_alert)
@@ -85,7 +80,8 @@ class Notifier(private val app: ClientApp) {
             .setContentText(app.getString(R.string.battery_low_text, batteryAlert))
             .setContentIntent(pi(Intent(app, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.TAB_LINK), 3))
             .setCategory(Notification.CATEGORY_STATUS)
-            .setOnlyAlertOnce(!alert)   // sound and pop-up at a new 5 % step only; the level in between updates quietly
+            // Its own group: Android bundles an app's ungrouped notifications together, which put it among the texts.
+            .setGroup(GROUP_BATTERY)
             .setAutoCancel(true)
             .build())
     }
@@ -212,7 +208,7 @@ class Notifier(private val app: ClientApp) {
 
     companion object {
         const val CH_LINK = "link"; const val CH_CALLS = "calls"; const val CH_ONGOING = "ongoing"; const val CH_SMS = "messages"; const val CH_MISSED = "missed"; const val CH_BATTERY = "battery"
-        const val TAG_CALL = "call"; const val TAG_SMS = "sms"; const val TAG_MISSED = "missed"; const val TAG_REMOTE = "remote"; const val TAG_BATTERY = "battery"
+        const val TAG_CALL = "call"; const val TAG_SMS = "sms"; const val TAG_MISSED = "missed"; const val TAG_REMOTE = "remote"; const val TAG_BATTERY = "battery"; const val GROUP_BATTERY = "battery"
         private const val PREF_BATTERY = "battery_alert"; private const val PREF_BATTERY_STEP = "battery_alert_step"
         const val ACTION_TAKE = "app.tether.client.TAKE"; const val EXTRA_CID = "cid"
         const val ACTION_DECLINE = "app.tether.client.DECLINE"; const val ACTION_REPLY = "app.tether.client.REPLY"
