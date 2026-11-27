@@ -33,6 +33,12 @@
     <string name="channel_link">اتصال</string>
     <string name="channel_messages">پیام‌ها</string>
     <string name="channel_missed">تماس‌های بی‌پاسخ</string>
+    <string name="channel_battery">باتری گوشی اندروید</string>
+    <string name="battery_alert">هشدار باتری کم</string>
+    <string name="battery_alert_off">خاموش</string>
+    <string name="battery_alert_help">وقتی باتری گوشی اندروید به این مقدار برسد، و هر ۵٪ کمتر از آن، اعلانی می‌آید (وقتی در حال شارژ نیست).</string>
+    <string name="battery_low_title">باتری %1$s: %2$d٪</string>
+    <string name="battery_low_text">کمتر از هشدار %d٪ شما. به‌زودی شارژش کنید.</string>
     <string name="channel_ongoing">تماس‌ها (بی‌صدا)</string>
     <string name="clear_all">پاک کردن همه</string>
     <string name="clear_recents_confirm">همه تماس‌های اخیر روی گوشی اندروید پاک شوند؟</string>

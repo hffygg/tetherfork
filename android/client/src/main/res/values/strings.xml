@@ -34,6 +34,12 @@
     <string name="channel_link">Link</string>
     <string name="channel_messages">Messages</string>
     <string name="channel_missed">Missed calls</string>
+    <string name="channel_battery">Android phone battery</string>
+    <string name="battery_alert">Low battery alert</string>
+    <string name="battery_alert_off">Off</string>
+    <string name="battery_alert_help">A notification when the Android phone\'s battery falls to this level, and again at every 5 %% below it, while it is not charging.</string>
+    <string name="battery_low_title">%1$s battery at %2$d %%</string>
+    <string name="battery_low_text">Below your %d %% alert. Charge it soon.</string>
     <string name="channel_ongoing">Calls (silent)</string>
     <string name="clear_all">Clear all</string>
     <string name="clear_recents_confirm">Clear all recent calls on the Android phone?</string>
