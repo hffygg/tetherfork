@@ -16,7 +16,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Size
-import android.view.Gravity
 import android.view.Surface
 import android.view.TextureView
 import android.widget.EditText
@@ -59,8 +58,7 @@ class PairActivity : Activity() {
         root.addView(FrameLayout(this).apply { addView(preview) }, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(12); bottomMargin = dp(12) })
         val manual = EditText(this).apply { hint = getString(R.string.pair_manual_hint); setTextColor(col(R.color.text)); setHintTextColor(col(R.color.muted)); setSingleLine() }
         root.addView(manual)
-        root.addView(row(pill(getString(R.string.pair)) { use(manual.text.toString()) }, pill(getString(android.R.string.cancel), secondary = true) { finish() },
-            gravity = Gravity.CENTER_VERTICAL))
+        root.addView(evenRow(button(getString(android.R.string.cancel), Look.TEXT) { finish() }, button(getString(R.string.pair)) { use(manual.text.toString()) }))
         setContentView(root)
         fitSystemBars(root)
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.CAMERA), 1)

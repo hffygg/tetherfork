@@ -54,6 +54,16 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
     var recents: List<CallEntry> = emptyList(); private set
     var contactsVersion = ""; private set
     val readUpTo = HashMap<Long, Long>()
+    /** Texts starred on this phone (ids; Android's message store has no star, so it stays here). */
+    val starred = HashSet<Long>()
+
+    fun isStarred(id: Long) = id in starred
+
+    /** Stars or unstars texts (by id). */
+    fun setStarred(ids: Collection<Long>, on: Boolean) {
+        if (on) starred.addAll(ids) else starred.removeAll(ids.toSet())
+        persist()
+    }
     val drafts = HashMap<String, String>()
     val threadSim = HashMap<String, Int>()
     var status: JSONObject? = null; private set
@@ -177,7 +187,9 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
 
     private fun applyDeleted(ids: List<Long>, thread: Long?) {
         val gone = ids.toHashSet()
+        if (thread != null) starred.removeAll(sms.filter { it.thread == thread }.map { it.id }.toSet())
         sms = sms.filterNot { it.id in gone || (thread != null && it.thread == thread) }
+        starred.removeAll(gone)
         if (thread != null) { readUpTo.remove(thread); fx.clearSms(thread) }
         if (ids.isNotEmpty()) {
             fx.clearSmsIds(ids)
@@ -264,6 +276,57 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
         link.send(T.NET_GET, JSONObject(), expectReply = true)
     }
     fun runSelftest() { selftest = null; link.send(T.SELFTEST, JSONObject(), expectReply = true); fx.changed() }
+
+    // ------------------------------------------------------------------ carrier codes (USSD)
+
+    /**
+     * The carrier's answer to a code: [text] when [ok], else [err] (the Android phone's words, or [Problem.NO_ANSWER]).
+     * [session]: the carrier's menu is open on the Android phone and waits for a reply ([replyUssd]).
+     */
+    data class UssdAnswer(val code: String, val ok: Boolean, val text: String?, val err: String?, val session: Boolean = false)
+
+    /** Whether the Android phone runs carrier codes (`status.tools.ussd`, from builds with the phone tools). */
+    val canUssd: Boolean get() = status?.optJSONObject("tools")?.optBoolean("ussd") == true
+    /** The code waiting for its answer (one at a time, as on the Android phone), and the last answer. */
+    var ussdPending: String? = null; private set
+    var ussdAnswer: UssdAnswer? = null; private set
+    private var ussdRequest = 0
+
+    /** Sends [code] on SIM [sub] through the Android phone; the answer comes as [ussdAnswer] (at most ~35 s). */
+    fun sendUssd(code: String, sub: Int?) {
+        if (!link.isConnected || ussdPending != null || !UssdCodes.valid(code)) return
+        ussdPending = code
+        ussdAnswer = null
+        ussdRequest = link.send(T.USSD_SEND, JSONObject().put("code", code).apply { sub?.let { put("sub", it) } }, expectReply = true)
+        // The Android phone answers within 30 s (its own timeout); a lost reply must not leave the screen waiting.
+        val asked = ussdRequest
+        fx.schedule(40_000) {
+            if (ussdPending == code && ussdRequest == asked) { ussdPending = null; ussdAnswer = UssdAnswer(code, false, null, Problem.NO_ANSWER); fx.changed() }
+        }
+        fx.changed()
+    }
+
+    /** Answers the open carrier menu with [text] (a choice such as "2"); the next answer comes as [ussdAnswer]. */
+    fun replyUssd(text: String) {
+        val open = ussdAnswer?.takeIf { it.session } ?: return
+        if (!link.isConnected || ussdPending != null) return
+        ussdPending = open.code
+        ussdAnswer = null
+        ussdRequest = link.send(UssdMenu.REPLY, JSONObject().put("text", text), expectReply = true)
+        val asked = ussdRequest
+        fx.schedule(40_000) {
+            if (ussdPending == open.code && ussdRequest == asked) { ussdPending = null; ussdAnswer = UssdAnswer(open.code, false, null, Problem.NO_ANSWER); fx.changed() }
+        }
+        fx.changed()
+    }
+
+    /** Closes the carrier menu open on the Android phone (and forgets the answer here). */
+    fun cancelUssd() {
+        if (ussdAnswer?.session == true && link.isConnected) link.send(UssdMenu.CANCEL, JSONObject())
+        ussdAnswer = null; fx.changed()
+    }
+
+    fun clearUssd() { ussdAnswer = null; fx.changed() }
 
     // ------------------------------------------------------------------ sync and texts
 
@@ -470,6 +533,13 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
                 if (re != null) netPending = null
             }
             T.SELFTEST_RESULT -> selftest = b
+            T.USSD_RESULT -> {
+                // Only the answer to this client's own pending code.
+                val code = ussdPending ?: return true
+                if (re != null && re != ussdRequest) return true
+                ussdPending = null
+                ussdAnswer = UssdAnswer(code, b.optBoolean("ok"), b.optStringOrNull("text"), b.optStringOrNull("err"), b.optBoolean("session"))
+            }
             T.ERROR -> problem = Problem(Problem.OTHER, b.optString("msg"))
             T.PONG, T.PING -> return true
             else -> return false
@@ -549,7 +619,7 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
     fun wipe() {
         resetPendingIds()
         sms = emptyList(); contacts = emptyList(); recents = emptyList(); contactsVersion = ""
-        readUpTo.clear(); drafts.clear(); threadSim.clear(); status = null; lists = BlockLists(); smsSyncedUpTo = null
+        readUpTo.clear(); starred.clear(); drafts.clear(); threadSim.clear(); status = null; lists = BlockLists(); smsSyncedUpTo = null
         outbox = emptyList(); recentsSeenUpTo = null; net = null; pendingRead.clear(); pendingSms.clear(); smsIndex.clear()
         rebuildIndex(); persist()
     }
@@ -568,6 +638,7 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
         .put("recents", JSONArray(recents.map { it.json() }))
         .put("contactsVersion", contactsVersion)
         .put("readUpTo", JSONObject().apply { readUpTo.forEach { (k, v) -> put(k.toString(), v) } })
+        .put("starred", JSONArray(starred.toList()))
         .put("drafts", JSONObject(drafts as Map<*, *>))
         .put("threadSim", JSONObject(threadSim as Map<*, *>))
         .put("lists", lists.json())
@@ -584,6 +655,7 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
         recents = o.optJSONArray("recents").mapObjects(::callEntryOf)
         contactsVersion = o.optString("contactsVersion")
         o.optJSONObject("readUpTo")?.let { r -> r.keys().forEach { k -> k.toLongOrNull()?.let { readUpTo[it] = r.optLong(k) } } }
+        o.optJSONArray("starred")?.let { a -> starred.clear(); for (i in 0 until a.length()) starred += a.optLong(i) }
         o.optJSONObject("drafts")?.let { r -> r.keys().forEach { drafts[it] = r.optString(it) } }
         o.optJSONObject("threadSim")?.let { r -> r.keys().forEach { threadSim[it] = r.optInt(it) } }
         status = o.optJSONObject("status")
@@ -593,4 +665,13 @@ class ClientState(private val link: LinkPort, private val fx: Effects) {
         outbox = o.optJSONArray("outbox").mapObjects { OutboxItem(it.optString("to"), it.optString("body"), it.optIntOrNull("sub"), it.optLong("placeholder")) }
         rebuildIndex()
     }
+}
+
+/**
+ * Replies to a carrier's USSD menu. Sent only while the Android phone says a menu is open (`"session": true` on
+ * ussd.result); an Android phone app that never says so never receives them, so this client works with it as it is.
+ */
+object UssdMenu {
+    const val REPLY = "ussd.reply"
+    const val CANCEL = "ussd.cancel"
 }

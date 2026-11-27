@@ -26,6 +26,8 @@ import app.tether.client.model.Effects
 import app.tether.client.model.LinkPort
 import app.tether.client.model.Problem
 import app.tether.client.ui.CallActivity
+import app.tether.client.ui.UssdActivity
+import app.tether.client.model.UssdCodes
 import app.tether.core.AudioFrame
 import app.tether.core.CallEntry
 import app.tether.core.Message
@@ -125,7 +127,16 @@ class ClientApp : Application(), LinkEvents {
 
     /** Coalesced: many changes in one burst redraw once. */
     fun changed() {
-        if (changePosted.compareAndSet(false, true)) main.post { changePosted.set(false); listeners.forEach { runCatching { it() } } }
+        if (changePosted.compareAndSet(false, true)) main.post {
+            changePosted.set(false)
+            // The Phone-app calling accounts follow the Android phone's SIMs (one per SIM).
+            if (::telecom.isInitialized) runCatching { telecom.syncPhoneAccounts() }
+            // A call on another device: in the notification bar with Move here.
+            if (::calls.isInitialized) runCatching { notifier.syncRemoteCalls(calls.remote) }
+            // The Android phone's battery below the alert level: a notification, again at every 5 % lower.
+            runCatching { notifier.syncBattery() }
+            listeners.forEach { runCatching { it() } }
+        }
     }
 
     fun problem(kind: String, detail: String? = null) { state.problem = Problem(kind, detail); changed() }
@@ -142,15 +153,28 @@ class ClientApp : Application(), LinkEvents {
         notifier.clearAll()
     }
 
+    /** The call screen: the Phone app's for a call in the Phone app (if Android lets this app open it), else this app's. */
     fun openCallScreen() {
+        if (telecom.inPhoneApp(calls.calls.firstOrNull()?.local) && telecom.showPhoneAppCallScreen()) return
         runCatching { startActivity(Intent(this, CallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 
     /** Keeps the link service in the foreground; during a call also as a phone-call / microphone service. */
     fun service(callMode: Boolean) = LinkService.callMode(this, callMode)
 
+    /** The carrier-code screen with [code], sent at once (a code dialed in the Phone app or a tel: link). */
+    fun openUssd(code: String, sub: Int?) {
+        runCatching {
+            startActivity(Intent(this, UssdActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(UssdActivity.EXTRA_CODE, code).putExtra(UssdActivity.EXTRA_SEND, true)
+                .apply { sub?.let { putExtra(UssdActivity.EXTRA_SUB, it) } })
+        }
+    }
+
     /** Dials from this phone through Telecom (onCreateOutgoingConnection asks the Android phone). */
     fun dial(number: String, sub: Int?) {
+        // A carrier code (*123#): runs as USSD, not as a call.
+        if (UssdCodes.valid(number)) { openUssd(number, sub); return }
         val n = app.tether.client.model.dialable(number)
         if (n.isEmpty()) return
         if (!link.isConnected) { problem(Problem.NOT_CONNECTED); return }
@@ -178,7 +202,11 @@ class ClientApp : Application(), LinkEvents {
         override fun showSms(m: Sms, from: String?, sim: String?) = notifier.showSms(m, from ?: format(m.addr), sim)
         override fun clearSms(thread: Long) = notifier.clearSms(thread)
         override fun clearSmsIds(ids: List<Long>) = notifier.clearSmsIds(ids)
-        override fun showMissedCall(c: CallEntry, from: String?, sim: String?) = notifier.showMissedCall(c, from ?: format(c.num), sim)
+        override fun showMissedCall(c: CallEntry, from: String?, sim: String?) {
+            // A call that rang in the Phone app is already there as a missed call.
+            if (::telecom.isInitialized && telecom.missedInPhoneApp(c.num)) return
+            notifier.showMissedCall(c, from ?: format(c.num), sim)
+        }
         override fun schedule(ms: Long, block: () -> Unit) { main.postDelayed(block, ms) }
         override fun changed() = this@ClientApp.changed()
         override fun save(json: String) {

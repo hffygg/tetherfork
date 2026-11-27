@@ -2,6 +2,105 @@
 
 ## Unreleased
 
+- Android client: **select texts in a conversation**. A long press selects a text (tap more to add them); the header
+  then shows how many, with Star / Unstar, Copy (the selected texts together, oldest first) and Delete (asks first).
+  With one selected: Select text, to copy part of it (also by holding the selected text again, as Telegram does),
+  and Send again for a text that was not delivered. Starred texts show a star by their time; stars are kept on this
+  phone. Back or ✕ stops selecting. This replaces the Copy / Delete menu.
+- Android client: **Starred messages**. A gold star beside the search field on the Messages tab opens the chats that
+  have starred texts (how many, and the newest one); tap a chat for its starred texts, newest first; tap a text to open
+  it in its conversation (scrolled to it and lit for a moment), hold it to unstar or copy. Both lists can be searched.
+- Android client: **low-battery alert for the SIM phone**. Link › Low battery alert (off, or 10 % to 50 %; 20 % by
+  default): when the SIM phone is not charging and its battery falls to that level, a notification says so, and it
+  alerts again at every 5 % below it (nothing changes in between). It goes away when the phone charges or rises above
+  the level. It has its own notification category, "Android phone battery", and its own group in the notification
+  shade, apart from texts. Texts are now conversation notifications (a shortcut per conversation), so Android 11+
+  lists them in the shade's Conversations section, apart from the app's other notifications such as this alert.
+- Android client: **the Messages list looks like a phone's messaging app**: a thin line between conversations; the
+  date on the right (the time today, "Yesterday", the weekday this week, else the date) and under it a round count
+  of unread texts instead of "(3)" after the name; unread conversations in bold with a brighter preview and a teal
+  date; two lines of the last text, in its own direction; a person icon for numbers that are not contacts.
+- Android client: **act on several conversations at once**. A long press starts selecting (tap more, or select all);
+  the search row becomes a bar with how many are selected and a row of actions: Read, Mute / Unmute, Block / Unblock,
+  Delete (asks first), and Call when one is selected. They stay above the list while it scrolls. Back or ✕ stops
+  selecting. This replaces the long-press menu, whose actions are all there.
+- Android client: **conversations laid out like a phone's messaging app**:
+  - a heading for each day (Today, Yesterday, then the weekday and date) in a chip between two lines, instead of a
+    date under every text; while you scroll, the day stays pinned at the top once its heading has gone off screen;
+  - each line of a text runs in the direction of its first letter: Persian right to left, English left to right;
+  - the time beside each bubble, once for texts sent in a row in the same minute, with "Sending" or "Not delivered"
+    under it; the SIM only in conversations that used more than one SIM;
+  - an "Unread messages" line above the texts that were unread when you opened the conversation, which opens there;
+  - bubbles in a run from one side sit closer together.
+- Android client: **Recents grouped by day**, like a phone's own call log:
+  - a heading for each day (Today, Yesterday, then the date) over a card of that day's calls;
+  - on each line: the direction as an arrow (missed and declined in red, blocked crossed out), the name (red when
+    missed), the SIM, how long the call took, and the time;
+  - calls in a row from the same number with the same direction share one line with a count, for example "(2)";
+  - while you scroll, a bubble at the top names the day you are in, and fades a moment after you stop;
+  - tap still calls back.
+- Android client: **delete several calls at once** in Recents. A long press starts selecting; tap more calls, or a
+  day's heading for the whole day (tap it again to unpick the day). A bar at the bottom shows how many are selected,
+  with Select all (an icon, lit when everything is picked; tap again to unpick all) and Delete (asks first); ⋮ there
+  opens the old one-call menu (call, message, copy, block) when one line is selected. Back or ✕ stops selecting.
+- Android client: the keypad's digits line up. Each digit is centred over its letters and in its key, and keys
+  without letters (1, *, #) keep an empty letters line, so every digit sits at the same height, as on a phone's own
+  dialer. The same fix centres the number typed above the keypad, the name under it, and the call screen's texts.
+- Android client: a carrier menu open on the SIM phone is answered directly (Reply, Cancel; only with an Android phone app
+  that keeps menus open and says so with `"session": true`, otherwise as before); a menu in a final answer
+  still goes out as a new code. A code dialed in the Phone app with Tether's calling account (or a `tel:` link) now
+  opens the USSD screen instead of starting a call that never connected.
+- Android client: **USSD codes** (carrier codes such as *123#). A new button under the call buttons on the keypad
+  opens a screen where you:
+  - choose the SIM, type a code and see the carrier's answer;
+  - answer a menu by typing your choice: it is sent as a new code that carries it (*123# then 2 sends *123*2#), which
+    most carriers accept;
+  - send a recent code again with one tap.
+- Android client: a call on another device (the SIM phone took it, or it was answered there) now stays in the
+  notification bar, "Call on another device" with a **Move here** button. A tap on it opens Tether. Before, the way
+  back was only the banner inside the app. It is quiet (no sound, no pop-up) and goes away when the call ends or comes
+  back here.
+- Android client: **Move here** puts the call straight into the Phone app's call screen again. Before, a call taken
+  back from the SIM phone rang in the Phone app like a new call, and answering it then barely worked. Since the
+  Phone-app calling accounts came in, a call that already runs (moved here, answered on the SIM phone, live after a
+  reconnect) was reported to Android as a new incoming call. It is now handed over as an outgoing call, which Android
+  shows in the call screen without ringing, and "Move to the Phone app" does the same for a running call. Both need
+  the Phone permission; without it the call shows in Tether's own call screen, as before. The Phone app's call history
+  may list such a call as outgoing.
+- Android client, calls in the Phone app:
+  - **An incoming call could ring in Tether's own screen instead of the Phone app.** The calling accounts were
+    removed and added again whenever the SIM phone's status briefly listed fewer SIMs (while reconnecting, after a
+    restart or after pairing again). Android then forgot they were turned on. An account now stays registered while
+    the setting is on.
+  - **Which accounts are on** is read from the accounts Android can call with (as the Phone app does) once the Phone
+    permission is allowed. An account Android refuses is skipped.
+  - **The link log** says where each incoming call went, and why if not to the Phone app.
+  - **Tether's call screen** has **Move to the Phone app** (the call goes on, nothing is sent to the SIM phone) for a
+    call shown there, and **Phone app call screen** for a call already in the Phone app. Tapping the call banner opens
+    the Phone app's call screen for such a call.
+  - **Link › Calls** says when an incoming call in Tether's own screen can't wake the screen: since Android 14 that
+    needs full-screen notifications allowed for the app. A button opens that setting.
+- Android client: **calls in the Phone app**. A new switch, Link › Calls › "Use the Phone app for calls" (on by
+  default), makes the Android phone's SIMs calling accounts of this phone, one per SIM ("Tether · Work"). Calls then
+  ring in the Phone app with its call screen and ringtone, can be dialed from its keypad, contacts and call history,
+  and are logged there. Android asks you to turn the accounts on once (Open calling accounts). Until you do, or with
+  the switch off, calls use Tether Client's own call screen as before. The protocol and the SIM phone's app do not
+  change. Calling from Tether Client's own keypad through the Phone app needs the Phone permission. A missed call
+  that rang in the Phone app is not notified a second time.
+- Android client: new buttons throughout. Every button now shows a ripple when pressed, looks disabled when it is
+  disabled, is at least 48dp tall and wraps its text, so large font sizes and Persian no longer clip. TalkBack
+  announces each one as a button, with a description for icon-only ones.
+  - Tabs have icons, a highlight behind the selected one, and a red count badge for missed calls and unread texts.
+  - Keypad: round keys with a ripple and a key-press haptic. Backspace sits next to the number (hold it to clear).
+    A green call button per SIM, disabled while the number is empty. The keypad is no longer rebuilt on every key.
+  - Call screen: round actions with a label under each (Mute, Speaker / Bluetooth / Headset, Keypad, Hold). They
+    fill with the accent colour when on. Answer, Decline and End call are large round buttons.
+  - Conversation: call and menu icons in the header, a round Send button (disabled while the text is empty), and a
+    SIM chip.
+  - Recents, Contacts and Messages: Clear all, New contact and New message are icon buttons beside the search field.
+    The call banner and the error banner show a ripple when tapped.
+  - Link: the data SIM is a row of choices with the chosen one filled; the quieter actions use quieter styles.
+
 ## 1.2.5 — 2026-11-25
 
 - iPhone: Tether sets its CallKit provider up again when iOS restarted its call service under the running app. Until

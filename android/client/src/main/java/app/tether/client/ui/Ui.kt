@@ -13,7 +13,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.BaseAdapter
-import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -49,22 +48,15 @@ fun Activity.fitSystemBars(root: View) {
 fun Context.dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 fun Context.col(id: Int) = getColor(id)
 
+/**
+ * A text in the app's style. It is aligned to the start of the view's own direction (right in Persian, also for a
+ * Latin name), which overrides `gravity`: a centred label also sets `textAlignment = TEXT_ALIGNMENT_CENTER`, else it
+ * is drawn at the start of its box (keypad digits sat left of their letters).
+ */
 fun Context.label(t: CharSequence, colorId: Int = R.color.text, size: Float = 15f, bold: Boolean = false) = TextView(this).apply {
     text = t; textSize = size; setTextColor(col(colorId)); setPadding(0, dp(2), 0, dp(2))
     textAlignment = View.TEXT_ALIGNMENT_VIEW_START
     if (bold) setTypeface(typeface, Typeface.BOLD)
-}
-
-fun Context.pill(t: String, secondary: Boolean = false, colorId: Int = R.color.accent, onClick: () -> Unit) = Button(this).apply {
-    text = t; isAllCaps = false; textSize = 15f
-    setTextColor(if (secondary) col(colorId) else col(R.color.background))
-    background = GradientDrawable().apply {
-        cornerRadius = dp(20).toFloat()
-        if (secondary) setStroke(dp(1), col(colorId)) else setColor(col(colorId))
-    }
-    layoutParams = LinearLayout.LayoutParams(-2, dp(42)).apply { topMargin = dp(6); marginEnd = dp(8) }
-    setPadding(dp(16), 0, dp(16), 0)
-    setOnClickListener { onClick() }
 }
 
 fun Context.round(colorId: Int, sizeDp: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(col(colorId)); setSize(dp(sizeDp), dp(sizeDp)) }
@@ -76,9 +68,19 @@ fun Context.card() = LinearLayout(this).apply {
     layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }
 }
 
+/**
+ * A horizontal row. A centred LinearLayout moves a child with uneven top and bottom margins down by half their
+ * difference, past the row's bottom edge, where it is cut off: a button's 6dp top margin (its spacing in a column) lost
+ * the bottom of the button. In a row the margin is split evenly above and below. No baseline alignment either.
+ */
 fun Context.row(vararg views: View, gravity: Int = Gravity.CENTER_VERTICAL) = LinearLayout(this).apply {
-    orientation = LinearLayout.HORIZONTAL; this.gravity = gravity
-    views.forEach { addView(it) }
+    orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; this.gravity = gravity
+    views.forEach { v ->
+        (v.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+            val m = (lp.topMargin + lp.bottomMargin) / 2; lp.topMargin = m; lp.bottomMargin = m
+        }
+        addView(v)
+    }
 }
 
 fun View.weight(w: Float = 1f): View { layoutParams = LinearLayout.LayoutParams(0, -2, w); return this }
@@ -86,12 +88,13 @@ fun View.weight(w: Float = 1f): View { layoutParams = LinearLayout.LayoutParams(
 /** A row of buttons sharing the width equally (one line each), so long labels (Persian, "Bluetooth") never push a
  *  button off the screen (#12). */
 fun Context.evenRow(vararg buttons: TextView) = LinearLayout(this).apply {
-    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+    orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
     buttons.forEachIndexed { i, b ->
-        val h = (b.layoutParams as? LinearLayout.LayoutParams)?.height ?: dp(42)
-        b.setSingleLine(); b.ellipsize = android.text.TextUtils.TruncateAt.END; b.setPadding(dp(8), 0, dp(8), 0)
-        addView(b, LinearLayout.LayoutParams(0, h, 1f).apply {
-            topMargin = dp(6); marginStart = if (i == 0) 0 else dp(4); marginEnd = if (i == buttons.lastIndex) 0 else dp(4)
+        // One line, but not setSingleLine(): that also scrolls the text sideways, which with centred text drew a SIM's
+        // name outside its button.
+        b.maxLines = 1; b.ellipsize = android.text.TextUtils.TruncateAt.END; b.setPadding(dp(8), dp(8), dp(8), dp(8))
+        addView(b, LinearLayout.LayoutParams(0, -2, 1f).apply {
+            topMargin = dp(3); bottomMargin = dp(3); marginStart = if (i == 0) 0 else dp(4); marginEnd = if (i == buttons.lastIndex) 0 else dp(4)
         })
     }
 }
@@ -118,6 +121,38 @@ fun Context.avatar(name: String, photo: String?, sizeDp: Int = 40): View {
 
 fun Context.time(ms: Long): String = if (DateUtils.isToday(ms)) DateUtils.formatDateTime(this, ms, DateUtils.FORMAT_SHOW_TIME)
     else DateUtils.getRelativeTimeSpanString(ms, System.currentTimeMillis(), DateUtils.DAY_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString()
+
+/** The start of [ms]'s local day (groups calls and texts by day). */
+fun dayStart(ms: Long): Long = java.util.Calendar.getInstance().apply {
+    timeInMillis = ms; set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+    set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+}.timeInMillis
+
+/** "Today", "Yesterday", else the weekday and date ("Thursday, November 19"; with the year when not this year). */
+fun Context.dayName(day: Long): String {
+    val today = dayStart(System.currentTimeMillis())
+    val yesterday = dayStart(today - 12 * 3600_000L)
+    if (day == today) return getString(R.string.recents_today)
+    if (day == yesterday) return getString(R.string.recents_yesterday)
+    val thisYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) ==
+        java.util.Calendar.getInstance().apply { timeInMillis = day }.get(java.util.Calendar.YEAR)
+    return DateUtils.formatDateTime(this, day, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_WEEKDAY or
+        if (thisYear) DateUtils.FORMAT_NO_YEAR else DateUtils.FORMAT_SHOW_YEAR)
+}
+
+/** A conversation's date: the time today, "Yesterday", the weekday this week, else the date (the year when not this one). */
+fun Context.listDate(ms: Long): String {
+    val day = dayStart(ms); val today = dayStart(System.currentTimeMillis())
+    return when {
+        day == today -> android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_TIME)
+        today - day < 6 * 86_400_000L + 3_600_000L && day != dayStart(today - 12 * 3600_000L) ->
+            android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_WEEKDAY or android.text.format.DateUtils.FORMAT_ABBREV_WEEKDAY)
+        day == dayStart(today - 12 * 3600_000L) -> getString(R.string.recents_yesterday)
+        java.util.Calendar.getInstance().apply { timeInMillis = ms }.get(java.util.Calendar.YEAR) == java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) ->
+            android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_NO_YEAR or android.text.format.DateUtils.FORMAT_ABBREV_MONTH)
+        else -> android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_NUMERIC_DATE)
+    }
+}
 
 /** The words for a [Problem] (its detail comes from the Android phone as is). */
 fun Context.describe(p: Problem): String {

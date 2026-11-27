@@ -1,5 +1,6 @@
 package app.tether.client.ui
 
+import app.tether.client.model.BatteryAlert
 import app.tether.client.report.ClientReport
 import app.tether.client.report.ReportUi
 import android.Manifest
@@ -32,7 +33,9 @@ import android.widget.TextView
 import app.tether.client.R
 import app.tether.client.link.BleCentral
 import app.tether.client.link.LinkService
+import app.tether.client.model.RecentsLayout
 import app.tether.client.model.Search
+import app.tether.client.model.UssdCodes
 import app.tether.client.model.dialable
 import app.tether.core.CallEntry
 import app.tether.core.Contact
@@ -43,19 +46,22 @@ class MainActivity : Activity() {
     private lateinit var content: FrameLayout
     private lateinit var banner: LinearLayout
     private lateinit var status: TextView
-    private val tabButtons = ArrayList<TextView>()
+    private val tabs = ArrayList<TabView>()
     private var tab = TAB_KEYPAD
     private val listener: () -> Unit = { render() }
     private var query = ""
     private var number = StringBuilder()
     private var list: ListView? = null
+    /** The frame around [list], and Recents' floating date bubble in it (null until Recents shows). */
+    private var listFrame: FrameLayout? = null
+    private var dayBubble: TextView? = null
     private var listTab = -1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tab = savedInstanceState?.getInt("tab") ?: if (app.identity.isPaired) TAB_RECENTS else TAB_LINK
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(col(R.color.background)) }
-        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(14), dp(16), dp(6)) }
+        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(14), dp(16), dp(6)) }
         header.addView(label(getString(R.string.app_name), size = 22f, bold = true).weight())
         status = label("", R.color.muted, 13f)
         header.addView(status)
@@ -64,14 +70,11 @@ class MainActivity : Activity() {
         root.addView(banner)
         content = FrameLayout(this)
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
-        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(col(R.color.surface)) }
-        listOf(R.string.tab_recents, R.string.tab_contacts, R.string.tab_keypad, R.string.tab_messages, R.string.tab_link).forEachIndexed { i, s ->
-            val b = TextView(this).apply {
-                text = getString(s); gravity = Gravity.CENTER; textSize = 13f; setPadding(0, dp(14), 0, dp(14))
-                setOnClickListener { select(i) }
-            }
-            tabButtons += b
-            bar.addView(b, LinearLayout.LayoutParams(0, -2, 1f))
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; setBackgroundColor(col(R.color.surface)); setPadding(0, dp(6), 0, dp(6)) }
+        TAB_NAMES.forEachIndexed { i, name ->
+            val t = TabView(this, TAB_ICONS[i], getString(name)) { select(i) }
+            tabs += t
+            bar.addView(t, LinearLayout.LayoutParams(0, -2, 1f))
         }
         root.addView(bar)
         setContentView(root)
@@ -121,6 +124,7 @@ class MainActivity : Activity() {
     private fun select(i: Int) {
         if (tab == TAB_RECENTS && i != TAB_RECENTS) app.state.markRecentsSeen()
         tab = i; query = ""; listTab = -1
+        if (picked != null || pickedChats != null) { picked = null; pickedChats = null; watchBack(false) }
         render()
     }
 
@@ -136,11 +140,8 @@ class MainActivity : Activity() {
             else -> getString(R.string.state_connecting)
         }
         status.setTextColor(col(if (app.linkState == BleCentral.State.CONNECTED) R.color.ok else R.color.muted))
-        tabButtons.forEachIndexed { i, b ->
-            val badge = when (i) { TAB_RECENTS -> s.missedCount; TAB_MESSAGES -> s.unreadTotal; else -> 0 }
-            b.text = getString(listOf(R.string.tab_recents, R.string.tab_contacts, R.string.tab_keypad, R.string.tab_messages, R.string.tab_link)[i]) +
-                if (badge > 0) " ($badge)" else ""
-            b.setTextColor(col(if (i == tab) R.color.accent else R.color.muted))
+        tabs.forEachIndexed { i, t ->
+            t.update(selected = i == tab, badge = when (i) { TAB_RECENTS -> s.missedCount; TAB_MESSAGES -> s.unreadTotal; else -> 0 })
         }
         renderBanner()
         when (tab) {
@@ -155,32 +156,37 @@ class MainActivity : Activity() {
     private fun renderBanner() {
         banner.removeAllViews()
         app.state.problem?.let { p ->
+            // Tap to dismiss.
             banner.addView(label(describe(p), R.color.warn, 14f).apply {
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                background = GradientDrawable().apply { setColor(col(R.color.surface)); cornerRadius = dp(10).toFloat() }
-                setOnClickListener { app.state.problem = null; render() }
-            })
+                setPadding(dp(12), dp(10), dp(12), dp(10)); minHeight = dp(48)
+                pressableCard(R.color.surface) { app.state.problem = null; render() }
+            }, bannerParams())
         }
         app.micWarning?.takeIf { app.identity.isPaired }?.let { w ->
             banner.addView(label(getString(micText(w)), R.color.warn, 14f).apply {
-                setPadding(dp(12), dp(8), dp(12), dp(8))
+                setPadding(dp(12), dp(10), dp(12), dp(10))
                 background = GradientDrawable().apply { setColor(col(R.color.surface)); cornerRadius = dp(10).toFloat() }
-            })
+            }, bannerParams())
         }
         app.calls.calls.firstOrNull()?.let { c ->
-            banner.addView(label("☎ " + (c.name ?: app.format(c.number)) + " · " + stateWord(c.state), R.color.background, 14f).apply {
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-                background = GradientDrawable().apply { setColor(col(R.color.ok)); cornerRadius = dp(10).toFloat() }
-                setOnClickListener { app.openCallScreen() }
-            })
+            // The call in progress: tap to go back to the call screen.
+            banner.addView(label((c.name ?: app.format(c.number)) + " · " + stateWord(c.state), R.color.background, 14f, bold = true).apply {
+                setPadding(dp(12), dp(10), dp(12), dp(10)); minHeight = dp(48); gravity = Gravity.CENTER_VERTICAL
+                setCompoundDrawablesRelative(icon(R.drawable.ic_call, R.color.background, 18), null, null, null); compoundDrawablePadding = dp(10)
+                pressableCard(R.color.ok) { app.openCallScreen() }
+            }, bannerParams())
         }
         for (r in app.calls.remote.values) {
             banner.addView(row(
                 label(getString(R.string.call_elsewhere, app.displayName(r.num), r.where ?: getString(R.string.another_device)), R.color.text, 14f).weight(),
-                pill(getString(R.string.move_here)) { app.calls.take(r.cid) },
-            ).apply { setPadding(dp(12), dp(4), dp(4), dp(4)); background = GradientDrawable().apply { setColor(col(R.color.surface)); cornerRadius = dp(10).toFloat() } })
+                button(getString(R.string.move_here), iconId = R.drawable.ic_call) { app.calls.take(r.cid) }.apply {
+                    layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(dp(8), dp(4), dp(4), dp(4)) }
+                },
+            ).apply { setPadding(dp(12), dp(2), dp(4), dp(2)); background = GradientDrawable().apply { setColor(col(R.color.surface)); cornerRadius = dp(10).toFloat() } }, bannerParams())
         }
     }
+
+    private fun bannerParams() = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) }
 
     private fun stateWord(s: String) = getString(when (s) {
         "ringing" -> R.string.call_ringing; "dialing", "connecting" -> R.string.call_dialing
@@ -193,7 +199,7 @@ class MainActivity : Activity() {
             content.removeAllViews()
             val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(12), 0) }
             if (hint != null || extra != null) {
-                val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL }
                 if (hint != null) top.addView(EditText(this).apply {
                     this.hint = hint; setText(query); setSingleLine(); setTextColor(col(R.color.text)); setHintTextColor(col(R.color.muted))
                     addTextChangedListener(object : TextWatcher {
@@ -206,9 +212,11 @@ class MainActivity : Activity() {
                 box.addView(top)
             }
             val l = ListView(this).apply { divider = null; isFocusable = false }
-            box.addView(l, LinearLayout.LayoutParams(-1, 0, 1f))
+            // The list in a frame, so a screen can float something over it (Recents' date bubble).
+            val frame = FrameLayout(this).apply { addView(l, FrameLayout.LayoutParams(-1, -1)) }
+            box.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
             content.addView(box)
-            list = l; listTab = tab
+            list = l; listTab = tab; listFrame = frame; dayBubble = null
             l
         }
         val first = lv.firstVisiblePosition; val top = lv.getChildAt(0)?.top ?: 0
@@ -220,7 +228,7 @@ class MainActivity : Activity() {
 
     private fun rowView(avatar: View?, title: CharSequence, subtitle: CharSequence?, right: CharSequence?, titleColor: Int = R.color.text, bold: Boolean = false) =
         LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(10), dp(4), dp(10))
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(10), dp(4), dp(10))
             avatar?.let { addView(it) }
             val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
             texts.addView(label(title, titleColor, 16f, bold).apply { setSingleLine() })
@@ -231,19 +239,242 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ Recents
 
+    /**
+     * Recents grouped by day, as phones' own call logs show them: a day heading ("Today", "Yesterday", the date) over a
+     * card of that day's calls; per line the direction (arrow), the name (red when missed, a count for calls in a row
+     * from the same number), the SIM and how long the call took, and the time. While the list scrolls, a bubble at the
+     * top names the day being scrolled through, and fades a moment after it stops.
+     */
     private fun recents() {
         val s = app.state
-        val items = s.recents.filter { Search.matches(query, listOfNotNull(it.name, s.name(it.num)), listOf(it.num)) }
-        val clear = pill(getString(R.string.clear_all), secondary = true) {
+        val calls = s.recents.filter { Search.matches(query, listOfNotNull(it.name, s.name(it.num)), listOf(it.num)) }
+        val items = RecentsLayout.build(calls, ::dayStart)
+        val clear = iconButton(R.drawable.ic_delete_sweep, getString(R.string.clear_all), R.color.accent) {
             AlertDialog.Builder(this).setMessage(R.string.clear_recents_confirm)
                 .setPositiveButton(R.string.clear_all) { _, _ -> s.clearRecents() }.setNegativeButton(android.R.string.cancel, null).show()
         }
-        listScreen(getString(R.string.search), clear, Rows(items) { c ->
-            val who = s.name(c.num) ?: c.name ?: app.format(c.num)
-            val kind = getString(when (c.type) { 1 -> R.string.call_in; 2 -> R.string.call_out; 3 -> R.string.call_missed; 5 -> R.string.call_declined; 6 -> R.string.call_blocked; else -> R.string.call_other })
-            val sub = listOfNotNull(kind, s.simName(c.sub), if (c.dur > 0) "%d:%02d".format(c.dur / 60, c.dur % 60) else null).joinToString(" · ")
-            rowView(avatar(who, s.photo(c.num)), who, sub, time(c.date), if (c.type == 3) R.color.bad else R.color.text)
-        }, onLong = { recentMenu(items[it]) }) { app.dial(items[it].num, items[it].sub ?: s.defaultSub) }
+        // Calls deleted meanwhile (here or on the Android phone) are no longer picked.
+        if (picked != null) { val have = s.recents.mapTo(HashSet()) { it.id }; picked!!.retainAll(have) }
+        listScreen(getString(R.string.search), clear, Rows(items) { item ->
+            when (item) {
+                is RecentsLayout.Item.Day -> label(dayName(item.day).uppercase(), R.color.muted, 13f, bold = true).apply {
+                    letterSpacing = 0.06f; setPadding(dp(8), dp(16), dp(8), dp(8))
+                }
+                is RecentsLayout.Item.Line -> recentLine(item)
+            }
+        }, onLong = { pos ->
+            // A long press starts picking calls (as phones' own call logs do); the one-call menu is on the bar (⋮).
+            val line = items[pos] as? RecentsLayout.Item.Line
+            if (picked == null && line != null) { picked = LinkedHashSet(); togglePick(items, pos) } else togglePick(items, pos)
+        }) { pos ->
+            if (picked != null) togglePick(items, pos)
+            else (items[pos] as? RecentsLayout.Item.Line)?.newest?.let { app.dial(it.num, it.sub ?: s.defaultSub) }
+        }
+        list?.selector = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)   // the lines ripple themselves
+        dateBubble(items)
+        selectionBar(items)
+    }
+
+    /**
+     * The calls picked for deleting together (their ids; a line of calls in a row picks all of them), or null when
+     * Recents is not picking. Picking ends on Back, on ✕, on another tab and after deleting; unpicking everything keeps
+     * it on (a day's heading tapped twice).
+     */
+    private var picked: LinkedHashSet<Long>? = null
+    private var selectBar: View? = null
+    private var backWhilePicking: Any? = null
+
+    private fun idsOf(item: RecentsLayout.Item, items: List<RecentsLayout.Item>): List<Long> = when (item) {
+        is RecentsLayout.Item.Line -> item.calls.map { it.id }
+        // A day's heading picks (or unpicks) every call of that day.
+        is RecentsLayout.Item.Day -> items.filterIsInstance<RecentsLayout.Item.Line>().filter { it.day == item.day }.flatMap { l -> l.calls.map { it.id } }
+    }
+
+    private fun togglePick(items: List<RecentsLayout.Item>, pos: Int) {
+        val set = picked ?: return
+        val ids = idsOf(items.getOrNull(pos) ?: return, items)
+        if (ids.isNotEmpty() && set.containsAll(ids)) set.removeAll(ids.toSet()) else set.addAll(ids)
+        list?.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+        render()   // stays selecting with nothing picked (a day picked and unpicked again); ✕ or Back ends it
+    }
+
+    private fun stopPicking() { picked = null; pickedChats = null; render() }
+
+    /** The bar floating at the bottom of Recents while picking: ✕, how many, ⋮ (one call's menu), select all, delete. */
+    private fun selectionBar(items: List<RecentsLayout.Item>) {
+        val frame = listFrame ?: return
+        selectBar?.let { if (it.parent === frame) frame.removeView(it) }; selectBar = null
+        val set = picked
+        watchBack(set != null)
+        if (set == null) return
+        val all = items.filterIsInstance<RecentsLayout.Item.Line>().flatMap { l -> l.calls.map { it.id } }
+        val allPicked = all.isNotEmpty() && set.containsAll(all)
+        val one = items.filterIsInstance<RecentsLayout.Item.Line>().singleOrNull { l -> l.calls.any { it.id in set } }
+            ?.takeIf { l -> l.calls.map { it.id }.containsAll(set) }
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(4), dp(8), dp(4)); elevation = dp(8).toFloat()
+            background = GradientDrawable().apply { cornerRadius = dp(28).toFloat(); setColor(col(R.color.surface)); setStroke(dp(1), col(R.color.background)) }
+            isClickable = true   // taps on the bar never reach the list under it
+            addView(iconButton(R.drawable.ic_close, getString(R.string.done_selecting)) { stopPicking() })
+            addView(label(getString(R.string.recents_selected, set.size), size = 15f, bold = true).apply {
+                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }.weight())
+            one?.let { l -> addView(iconButton(R.drawable.ic_more_vert, getString(R.string.more_options)) { recentMenu(l.newest) }) }
+            // An icon, so "3 selected" keeps its room (in words it cut the count to "1 selec"); lit when all are picked.
+            addView(iconButton(R.drawable.ic_select_all, getString(if (allPicked) R.string.select_none else R.string.select_all),
+                if (allPicked) R.color.accent else R.color.text) {
+                if (allPicked) set.clear() else set.addAll(all); render()
+            })
+            addView(button(getString(R.string.delete), Look.FILLED, R.color.bad, iconId = R.drawable.ic_delete_sweep) {
+                if (set.isEmpty()) return@button
+                val ids = set.toList()
+                AlertDialog.Builder(this@MainActivity).setMessage(getString(R.string.delete_calls_confirm, ids.size))
+                    .setPositiveButton(R.string.delete) { _, _ -> app.state.deleteRecents(ids); stopPicking() }
+                    .setNegativeButton(android.R.string.cancel, null).show()
+            }.apply { layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(4) }; isEnabled = set.isNotEmpty() })
+        }
+        frame.addView(bar, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(dp(4), 0, dp(4), dp(12)) })
+        selectBar = bar
+        // Room under the last call, so the bar never covers it.
+        list?.apply { clipToPadding = false; setPadding(0, 0, 0, dp(84)) }
+    }
+
+    /** Back ends picking (Android 13+ through the back dispatcher: an app targeting Android 16 gets no onBackPressed). */
+    private fun watchBack(on: Boolean) {
+        if (!on) list?.setPadding(0, 0, 0, 0)
+        if (Build.VERSION.SDK_INT >= 33) {
+            val d = onBackInvokedDispatcher
+            if (on && backWhilePicking == null) {
+                val cb = android.window.OnBackInvokedCallback { stopPicking() }
+                d.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb); backWhilePicking = cb
+            } else if (!on) (backWhilePicking as? android.window.OnBackInvokedCallback)?.let { d.unregisterOnBackInvokedCallback(it); backWhilePicking = null }
+        }
+    }
+
+    @Deprecated("Android 12 and older; newer ones use watchBack()")
+    override fun onBackPressed() {
+        if (picked != null || pickedChats != null) stopPicking() else @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    /** [a] with [f] of [b] mixed in (opaque: the list's rows sit on the page). */
+    private fun mix(a: Int, b: Int, f: Float): Int {
+        fun ch(s: Int) = (((a shr s) and 0xFF) * (1 - f) + ((b shr s) and 0xFF) * f).toInt() shl s
+        return (0xFF shl 24) or ch(16) or ch(8) or ch(0)
+    }
+
+    /** One line of a day's card: direction, name (and count), SIM and duration, time. Rounded where its card is. */
+    private fun recentLine(item: RecentsLayout.Item.Line): View {
+        val s = app.state
+        val c = item.newest
+        val who = s.name(c.num) ?: c.name ?: app.format(c.num)
+        val missed = c.type == 3
+        val (iconId, iconColor) = when (c.type) {
+            1 -> R.drawable.ic_call_received to R.color.muted
+            2 -> R.drawable.ic_call_made to R.color.ok
+            3 -> R.drawable.ic_call_missed to R.color.bad
+            5 -> R.drawable.ic_call_declined to R.color.bad
+            6 -> R.drawable.ic_block to R.color.muted
+            else -> R.drawable.ic_call_received to R.color.muted
+        }
+        val kind = getString(when (c.type) { 1 -> R.string.call_in; 2 -> R.string.call_out; 3 -> R.string.call_missed; 5 -> R.string.call_declined; 6 -> R.string.call_blocked; else -> R.string.call_other })
+        val duration = if (c.dur > 0) "%d:%02d".format(c.dur / 60, c.dur % 60) else null
+        val time = android.text.format.DateUtils.formatDateTime(this, c.date, android.text.format.DateUtils.FORMAT_SHOW_TIME)
+        val sim = s.simName(c.sub)
+        val r = dp(18).toFloat()
+        val radii = when (item.pos) {
+            RecentsLayout.Pos.ONLY -> floatArrayOf(r, r, r, r, r, r, r, r)
+            RecentsLayout.Pos.FIRST -> floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            RecentsLayout.Pos.LAST -> floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r)
+            RecentsLayout.Pos.MIDDLE -> floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
+        }
+        val picking = picked != null
+        val isPicked = picking && item.calls.all { it.id in picked!! }
+        val body = GradientDrawable().apply {
+            cornerRadii = radii
+            setColor(if (isPicked) mix(col(R.color.surface), col(R.color.accent), 0.2f) else col(R.color.surface))
+        }
+        val mask = GradientDrawable().apply { cornerRadii = radii; setColor(col(R.color.text)) }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = android.graphics.drawable.RippleDrawable(rippleColor(R.color.text), body, mask)
+            // A thin line between the lines of a card (not above its first).
+            if (item.pos == RecentsLayout.Pos.MIDDLE || item.pos == RecentsLayout.Pos.LAST)
+                addView(View(context).apply { setBackgroundColor(col(R.color.background)) }, LinearLayout.LayoutParams(-1, dp(1)).apply { marginStart = dp(48) })
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(10), dp(16), dp(10)); minimumHeight = dp(62)
+                if (picking) addView(android.widget.ImageView(context).apply {
+                    // A check mark in a filled circle when picked, an empty ring when not.
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        if (isPicked) setColor(col(R.color.accent)) else setStroke(dp(2), col(R.color.muted))
+                    }
+                    if (isPicked) setImageDrawable(icon(R.drawable.ic_check, R.color.background, 16))
+                    scaleType = android.widget.ImageView.ScaleType.CENTER
+                }, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(12) })
+                else addView(android.widget.ImageView(context).apply { setImageDrawable(icon(iconId, iconColor, 20)) }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(14) })
+                val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+                texts.addView(label(android.text.SpannableStringBuilder(who).apply {
+                    if (item.calls.size > 1) {
+                        val at = length; append(" (${item.calls.size})")
+                        setSpan(android.text.style.ForegroundColorSpan(col(R.color.muted)), at, length, 0)
+                    }
+                }, if (missed) R.color.bad else R.color.text, 16f).apply { setSingleLine(); ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, 0, 0, 0) })
+                texts.addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(3), 0, 0)
+                    sim?.let { addView(label(it, R.color.muted, 11f).apply {
+                        setPadding(dp(5), 0, dp(5), 0); background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setStroke(dp(1), col(R.color.muted)); alpha = 120 }
+                    }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }) }
+                    addView(label(duration ?: kind, R.color.muted, 13f).apply { setPadding(0, 0, 0, 0); if (duration != null) textDirection = View.TEXT_DIRECTION_LTR })
+                })
+                addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(label(time, if (missed) R.color.bad else R.color.muted, 14f).apply { setPadding(dp(8), 0, 0, 0); textDirection = View.TEXT_DIRECTION_LTR })
+            })
+            // TalkBack: one sentence for the line.
+            isSelected = isPicked
+            contentDescription = listOfNotNull(if (isPicked) getString(R.string.recents_selected, item.calls.size) else null, who, kind, item.calls.size.takeIf { it > 1 }?.toString(), sim, duration, time).joinToString(", ")
+        }
+    }
+
+    /** Whether the user is scrolling Recents (a finger on it, or a fling): kept here, as each render adds a new listener. */
+    private var recentsScrolling = false
+    private var bubbleShown = false
+    /** One fade for every render's listener, so a later render can still cancel it. */
+    private val bubbleFade = Runnable { bubbleShown = false; dayBubble?.animate()?.alpha(0f)?.setDuration(250)?.start() }
+
+    /**
+     * The bubble that names the day being scrolled through (as the Samsung Phone app does), "Today" at the top too.
+     * Shown when a scroll starts (not when the list only moves because it was rebuilt), faded a moment after it stops.
+     * It is shown once per scroll: starting the fade-in again on every scrolled frame kept it invisible until the
+     * list stopped.
+     */
+    private fun dateBubble(items: List<RecentsLayout.Item>) {
+        val frame = listFrame ?: return
+        val bubble = dayBubble ?: label("", size = 15f).apply {
+            gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; maxLines = 1
+            setPadding(dp(18), dp(8), dp(18), dp(8)); alpha = 0f; elevation = dp(6).toFloat()
+            background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(col(R.color.surface)); setStroke(dp(1), col(R.color.background)) }
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            frame.addView(this, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(10) })
+            dayBubble = this; recentsScrolling = false; bubbleShown = false
+        }
+        fun show() {
+            bubble.removeCallbacks(bubbleFade)
+            if (bubbleShown) return
+            bubbleShown = true
+            bubble.animate().cancel(); bubble.animate().alpha(1f).setDuration(120).start()
+        }
+        list?.setOnScrollListener(object : android.widget.AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(v: android.widget.AbsListView, state: Int) {
+                recentsScrolling = state != android.widget.AbsListView.OnScrollListener.SCROLL_STATE_IDLE
+                if (recentsScrolling) show() else { bubble.removeCallbacks(bubbleFade); bubble.postDelayed(bubbleFade, 900) }
+            }
+            override fun onScroll(v: android.widget.AbsListView, first: Int, visible: Int, total: Int) {
+                RecentsLayout.dayAt(items, first)?.let { bubble.text = dayName(it) }
+                if (recentsScrolling) show()
+            }
+        })
     }
 
     private fun recentMenu(c: CallEntry) {
@@ -271,7 +502,7 @@ class MainActivity : Activity() {
         val items = ArrayList<Any>()
         if (favs.isNotEmpty()) { items += getString(R.string.favourites); items.addAll(favs); items += getString(R.string.all_contacts) }
         items.addAll(all)
-        val add = pill(getString(R.string.add), secondary = true) { editContact(null) }
+        val add = iconButton(R.drawable.ic_person_add, getString(R.string.new_contact), R.color.accent) { editContact(null) }
         listScreen(getString(R.string.search), add, Rows(items) { it ->
             if (it is String) label(it.uppercase(), R.color.accent, 12f, bold = true).apply { setPadding(dp(4), dp(12), 0, dp(4)) }
             else (it as Contact).let { c -> rowView(avatar(c.name, c.photo), (if (c.starred) "★ " else "") + c.name, c.phones.firstOrNull()?.let { p -> app.format(p.n) }, null) }
@@ -307,40 +538,79 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ Keypad
 
+    private var keypadRoot: View? = null
+    private lateinit var keypadNumber: TextView
+    private lateinit var keypadWho: TextView
+    private lateinit var keypadBack: View
+    private lateinit var keypadCalls: LinearLayout
+    private lateinit var keypadAdd: View
+    private lateinit var keypadUssd: View
+
+    /** The keypad is built once while it is shown; a key press or a state change only updates its texts and buttons. */
     private fun keypad() {
         list = null; listTab = -1
-        content.removeAllViews()
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(24), dp(12), dp(24), dp(12)) }
-        val shown = label(if (number.isEmpty()) "" else app.format(number.toString()), size = 32f).apply { gravity = Gravity.CENTER; setSingleLine() }
-        val who = label(app.state.name(number.toString()) ?: "", R.color.muted, 14f).apply { gravity = Gravity.CENTER }
-        box.addView(shown, LinearLayout.LayoutParams(-1, dp(56)))
-        box.addView(who, LinearLayout.LayoutParams(-1, -2))
+        if (keypadRoot?.parent == null) {
+            content.removeAllViews()
+            content.addView(buildKeypad().also { keypadRoot = it })
+        }
+        updateKeypad()
+    }
+
+    private fun buildKeypad(): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(24), dp(8), dp(24), dp(16)) }
+        // The number, centred, with backspace at its end (a spacer of the same width keeps it centred).
+        keypadNumber = label("", size = 32f).apply { gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.START
+            textDirection = View.TEXT_DIRECTION_LTR }
+        keypadBack = iconButton(R.drawable.ic_backspace, getString(R.string.delete_digit), R.color.muted,
+            onLong = { number.clear(); updateKeypad() }) { if (number.isNotEmpty()) number.deleteCharAt(number.length - 1); updateKeypad() }
+        box.addView(row(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)) }, keypadNumber.weight(), keypadBack),
+            LinearLayout.LayoutParams(-1, dp(64)))
+        keypadWho = label("", R.color.muted, 14f).apply { gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; maxLines = 1 }
+        box.addView(keypadWho, LinearLayout.LayoutParams(-1, -2))
         val grid = GridLayout(this).apply { columnCount = 3; layoutDirection = View.LAYOUT_DIRECTION_LTR }
         val keys = listOf("1" to "", "2" to "ABC", "3" to "DEF", "4" to "GHI", "5" to "JKL", "6" to "MNO", "7" to "PQRS", "8" to "TUV", "9" to "WXYZ", "*" to "", "0" to "+", "#" to "")
         for ((k, sub) in keys) {
-            val b = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-                background = round(R.color.surface, 76)
-                addView(label(k, size = 28f).apply { gravity = Gravity.CENTER })
-                if (sub.isNotEmpty()) addView(label(sub, R.color.muted, 10f).apply { gravity = Gravity.CENTER })
-                setOnClickListener { number.append(k); keypad() }
-                if (k == "0") setOnLongClickListener { number.append("+"); keypad(); true }
-            }
-            grid.addView(b, GridLayout.LayoutParams().apply { width = dp(76); height = dp(76); setMargins(dp(10), dp(8), dp(10), dp(8)) })
+            grid.addView(dialKey(k, sub, onLong = if (k == "0") ({ number.append("+"); updateKeypad() }) else null) { number.append(k); updateKeypad() },
+                GridLayout.LayoutParams().apply { width = dp(76); height = dp(76); setMargins(dp(10), dp(6), dp(10), dp(6)) })
         }
-        box.addView(grid)
+        box.addView(grid, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
+        keypadCalls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER }
+        box.addView(keypadCalls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        // Under the call buttons: carrier codes (USSD) on the Android phone's SIM, and adding the number to contacts.
+        keypadUssd = button(getString(R.string.ussd_button), Look.TONAL, iconId = R.drawable.ic_dialpad) { openUssd(number.toString(), null) }
+        keypadAdd = button(getString(R.string.add_contact), Look.TEXT, iconId = R.drawable.ic_person_add) { editContact(null, number.toString()) }
+        box.addView(keypadUssd, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
+        box.addView(keypadAdd, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
+        return ScrollView(this).apply { addView(box) }
+    }
+
+    /** The carrier-code screen, with [code] typed in (sent at once when it is a code) on SIM [sub]. */
+    private fun openUssd(code: String, sub: Int?) {
+        startActivity(Intent(this, UssdActivity::class.java).putExtra(UssdActivity.EXTRA_CODE, code).apply { sub?.let { putExtra(UssdActivity.EXTRA_SUB, it) } }
+            .putExtra(UssdActivity.EXTRA_SEND, UssdCodes.valid(code)))
+    }
+
+    private fun updateKeypad() {
+        val n = number.toString()
+        keypadNumber.text = if (n.isEmpty()) "" else app.format(n)
+        val name = app.state.name(n)
+        keypadWho.text = name ?: ""
+        keypadBack.visibility = if (n.isEmpty()) View.INVISIBLE else View.VISIBLE
+        val code = UssdCodes.valid(n)
+        keypadAdd.visibility = if (n.isNotEmpty() && name == null && !code) View.VISIBLE else View.INVISIBLE
+        // Shown when the Android phone runs carrier codes (its builds with the phone tools say so in their status).
+        keypadUssd.visibility = if (app.state.canUssd) View.VISIBLE else View.GONE
+        // One green call button, or one per SIM labelled with its name.
+        keypadCalls.removeAllViews()
         val sims = app.state.sims
-        val callRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, dp(12), 0, 0) }
-        if (sims.size > 1) for (sim in sims) callRow.addView(pill(sim.name.ifEmpty { getString(R.string.sim_n, sim.slot + 1) }, colorId = R.color.ok) {
-            app.dial(number.toString(), sim.sub); number.clear(); keypad()
-        }) else callRow.addView(pill(getString(R.string.call), colorId = R.color.ok) { app.dial(number.toString(), app.state.defaultSub); number.clear(); keypad() })
-        callRow.addView(pill("⌫", secondary = true) { if (number.isNotEmpty()) number.deleteCharAt(number.length - 1); keypad() }.apply {
-            setOnLongClickListener { number.clear(); keypad(); true }
-        })
-        box.addView(callRow)
-        if (number.isNotEmpty() && app.state.name(number.toString()) == null)
-            box.addView(pill(getString(R.string.add_contact), secondary = true) { editContact(null, number.toString()) })
-        content.addView(ScrollView(this).apply { addView(box) })
+        val targets = if (sims.size > 1) sims.map { it.name.ifEmpty { getString(R.string.sim_n, it.slot + 1) } to it.sub }
+            else listOf(getString(R.string.call) to app.state.defaultSub)
+        for ((label, sub) in targets) keypadCalls.addView(roundAction(R.drawable.ic_call, label, R.color.ok) {
+            if (number.isEmpty()) return@roundAction
+            // A carrier code (*123#) on a call button: sent as USSD on that SIM, like a phone's own dialer does.
+            if (UssdCodes.valid(number.toString()) && app.state.canUssd) { openUssd(number.toString(), sub); number.clear(); updateKeypad(); return@roundAction }
+            app.dial(number.toString(), sub); number.clear(); updateKeypad()
+        }.apply { getChildAt(0).isEnabled = n.isNotEmpty() }, LinearLayout.LayoutParams(dp(112), -2))
     }
 
     // ------------------------------------------------------------------ Messages
@@ -349,36 +619,172 @@ class MainActivity : Activity() {
         val s = app.state
         val convs = s.conversations.filter { c -> Search.matches(query, listOfNotNull(s.name(c.address)), listOf(c.address)) ||
             (query.length > 1 && s.messages(c.thread).any { Search.fold(it.body).contains(Search.fold(query)) }) }
-        val compose = pill(getString(R.string.new_message), secondary = true) {
+        val compose = iconButton(R.drawable.ic_edit, getString(R.string.new_message), R.color.accent) {
             val f = EditText(this).apply { hint = getString(R.string.phone); inputType = InputType.TYPE_CLASS_PHONE }
             AlertDialog.Builder(this).setTitle(R.string.new_message).setView(FrameLayout(this).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(f) })
                 .setPositiveButton(R.string.next) { _, _ -> dialable(f.text.toString()).takeIf { it.isNotEmpty() }?.let { openThread(it) } }
                 .setNegativeButton(android.R.string.cancel, null).show()
         }
-        listScreen(getString(R.string.search), compose, Rows(convs) { c ->
-            val who = s.name(c.address) ?: app.format(c.address)
-            val muted = if (s.isMuted(c.thread)) "🔕 " else ""
-            val last = (if (!c.last.let { it.box == 1 }) getString(R.string.you) + ": " else "") + c.last.body.replace('\n', ' ')
-            rowView(avatar(who, s.photo(c.address)), muted + who + if (c.unread > 0) "  (${c.unread})" else "", last.take(120), time(c.last.date), bold = c.unread > 0)
-        }, onLong = { pos -> threadMenu(convs[pos].thread, convs[pos].address) }) { pos -> openThread(convs[pos].address, convs[pos].thread) }
+        // Beside the search field: the starred texts (gold), then New message (the pen).
+        val star = iconButton(R.drawable.ic_star_border, getString(R.string.starred_messages), R.color.warn) {
+            startActivity(Intent(this, StarredActivity::class.java))
+        }
+        val tools = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; addView(star); addView(compose) }
+        // Conversations deleted meanwhile are no longer picked.
+        pickedChats?.retainAll(s.conversations.mapTo(HashSet()) { it.thread })
+        listScreen(getString(R.string.search), tools, Rows(convs) { c -> conversationRow(c, last = c === convs.lastOrNull()) }, onLong = { pos ->
+            // A long press starts picking conversations; the actions for them come in a bar above the list.
+            if (pickedChats == null) pickedChats = LinkedHashSet()
+            toggleChat(convs[pos].thread)
+        }) { pos ->
+            if (pickedChats != null) toggleChat(convs[pos].thread) else openThread(convs[pos].address, convs[pos].thread)
+        }
+        chatSelectionBar(convs)
     }
 
-    private fun threadMenu(thread: Long, address: String) {
-        val s = app.state
-        val muted = s.isMuted(thread); val blocked = s.isBlocked(address)
-        val opts = listOf(getString(R.string.call), getString(if (muted) R.string.unmute else R.string.mute),
-            getString(if (blocked) R.string.unblock else R.string.block), getString(R.string.mark_read), getString(R.string.delete_conversation))
-        AlertDialog.Builder(this).setTitle(s.name(address) ?: app.format(address)).setItems(opts.toTypedArray()) { _, w ->
-            when (w) {
-                0 -> app.dial(address, s.preferredSim(address))
-                1 -> s.setMuted(thread, !muted)
-                2 -> s.setBlocked(address, !blocked)
-                3 -> s.markRead(thread)
-                4 -> AlertDialog.Builder(this).setMessage(R.string.delete_conversation_confirm)
-                    .setPositiveButton(R.string.delete) { _, _ -> s.deleteConversation(thread) }.setNegativeButton(android.R.string.cancel, null).show()
-            }
-        }.show()
+    /** The conversations (threads) picked for acting on together, or null when the Messages list is not picking. */
+    private var pickedChats: LinkedHashSet<Long>? = null
+
+    private fun toggleChat(thread: Long) {
+        val set = pickedChats ?: return
+        if (!set.remove(thread)) set += thread
+        list?.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+        render()
     }
+
+    /**
+     * While picking: the search row gives way to a bar (✕, how many, select all) and a row of actions for the picked
+     * conversations: Read, Mute / Unmute, Block / Unblock, Delete, and Call when there is one. Both stay above the
+     * list, so they stay in place while it scrolls.
+     */
+    private fun chatSelectionBar(convs: List<app.tether.client.model.Conversation>) {
+        val box = listFrame?.parent as? LinearLayout ?: return
+        (0 until box.childCount).map(box::getChildAt).filter { it.tag == SELECTION_TAG }.forEach(box::removeView)
+        val search = box.getChildAt(0).takeIf { it !== listFrame }
+        val set = pickedChats
+        watchBack(set != null)
+        search?.visibility = if (set == null) View.VISIBLE else View.GONE
+        if (set == null) return
+        val s = app.state
+        val picked = s.conversations.filter { it.thread in set }
+        val all = convs.map { it.thread }
+        val allPicked = all.isNotEmpty() && set.containsAll(all)
+        fun bar() = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(col(R.color.surface)) }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), 0, dp(4), 0); background = bar()
+            addView(iconButton(R.drawable.ic_close, getString(R.string.done_selecting)) { stopPicking() })
+            addView(label(getString(R.string.recents_selected, set.size), size = 16f, bold = true).apply {
+                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(dp(4), 0, 0, 0) }.weight())
+            addView(iconButton(R.drawable.ic_select_all, getString(if (allPicked) R.string.select_none else R.string.select_all),
+                if (allPicked) R.color.accent else R.color.text) { if (allPicked) set.clear() else set.addAll(all); render() })
+        }
+        val muted = picked.isNotEmpty() && picked.all { s.isMuted(it.thread) }
+        val blocked = picked.isNotEmpty() && picked.all { s.isBlocked(it.address) }
+        val one = picked.singleOrNull()
+        fun done() { stopPicking() }
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(4)); background = bar()
+            listOfNotNull(
+                one?.let { c -> chatAction(R.drawable.ic_call, getString(R.string.call)) { app.dial(c.address, s.preferredSim(c.address)); done() } },
+                chatAction(R.drawable.ic_mark_read, getString(R.string.action_read)) { picked.forEach { s.markRead(it.thread) }; done() },
+                chatAction(if (muted) R.drawable.ic_notifications else R.drawable.ic_notifications_off, getString(if (muted) R.string.unmute else R.string.mute)) {
+                    picked.forEach { s.setMuted(it.thread, !muted) }; done() },
+                chatAction(R.drawable.ic_block, getString(if (blocked) R.string.unblock else R.string.block)) {
+                    picked.map { it.address }.distinct().forEach { s.setBlocked(it, !blocked) }; done() },
+                chatAction(R.drawable.ic_delete, getString(R.string.delete), R.color.bad) {
+                    AlertDialog.Builder(this@MainActivity).setMessage(getString(R.string.delete_chats_confirm, picked.size))
+                        .setPositiveButton(R.string.delete) { _, _ -> picked.forEach { s.deleteConversation(it.thread) }; done() }
+                        .setNegativeButton(android.R.string.cancel, null).show()
+                },
+            ).forEach { a -> a.isEnabled = picked.isNotEmpty(); a.alpha = if (a.isEnabled) 1f else 0.38f; addView(a, LinearLayout.LayoutParams(0, -2, 1f)) }
+        }
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; tag = SELECTION_TAG; setPadding(0, dp(4), 0, dp(6))
+            addView(head, LinearLayout.LayoutParams(-1, dp(52)))
+            addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        }
+        box.addView(wrap, 0)
+    }
+
+    /** An action of the conversations bar: its icon over its name, with a ripple; faded when nothing is picked. */
+    private fun chatAction(iconId: Int, name: String, colorId: Int = R.color.text, onClick: () -> Unit): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(6)); minimumHeight = dp(56)
+        background = android.graphics.drawable.RippleDrawable(rippleColor(colorId), null, GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(col(R.color.text)) })
+        addView(android.widget.ImageView(context).apply { setImageDrawable(icon(iconId, colorId, 22)) }, LinearLayout.LayoutParams(dp(22), dp(22)))
+        addView(label(name, colorId, 12f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(dp(2), dp(4), dp(2), 0) }, LinearLayout.LayoutParams(-1, -2))
+        isClickable = true; isFocusable = true; contentDescription = name
+        setOnClickListener { if (isEnabled) onClick() }
+    }
+
+    /**
+     * One conversation, as phones' messaging apps list them: the picture (a person icon for a number that is not a
+     * contact), the name and two lines of the last text, the date and, under it, a round count of unread texts; unread
+     * ones in bold and brighter. A thin line under each, from the text's start.
+     */
+    private fun conversationRow(c: app.tether.client.model.Conversation, last: Boolean): View {
+        val s = app.state
+        val picking = pickedChats != null
+        val isPicked = pickedChats?.contains(c.thread) == true
+        val name = s.name(c.address)
+        val who = name ?: app.format(c.address)
+        val unread = c.unread > 0
+        val photo = s.photo(c.address)
+        val pic = if (picking) android.widget.ImageView(this).apply {
+            // Picking: a ring, filled with a check mark when picked.
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL
+                if (isPicked) setColor(col(R.color.accent)) else setStroke(dp(2), col(R.color.muted)) }
+            if (isPicked) setImageDrawable(icon(R.drawable.ic_check, R.color.background, 26))
+            scaleType = android.widget.ImageView.ScaleType.CENTER
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(14) }
+        } else if (name == null && photo == null) android.widget.ImageView(this).apply {
+            setImageDrawable(icon(R.drawable.ic_person, R.color.muted, 26)); scaleType = android.widget.ImageView.ScaleType.CENTER
+            background = round(R.color.surface, 48)
+            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(14) }
+        } else avatar(who, photo, 48).apply { (layoutParams as LinearLayout.LayoutParams).marginEnd = dp(14) }
+        val preview = (if (c.last.box != 1) getString(R.string.you) + ": " else "") + c.last.body.replace('\n', ' ').take(160)
+        val line = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(12), dp(4), dp(12)); minimumHeight = dp(76)
+            if (isPicked) background = GradientDrawable().apply { cornerRadius = dp(14).toFloat()
+                setColor(android.content.res.ColorStateList.valueOf(col(R.color.accent)).withAlpha(0x26).defaultColor) }
+            addView(pic)
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(label(if (s.isMuted(c.thread)) "🔕 $who" else who, R.color.text, 16f, bold = unread).apply {
+                    setSingleLine(); ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, 0, 0, dp(2)) })
+                // The text's own direction (Persian on the right, English on the left), as in the conversation.
+                addView(label(preview, if (unread) R.color.text else R.color.muted, 14f).apply {
+                    maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, 0, 0, 0)
+                    textDirection = View.TEXT_DIRECTION_FIRST_STRONG; textAlignment = View.TEXT_ALIGNMENT_TEXT_START })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.END
+                setPaddingRelative(dp(10), 0, 0, 0)
+                addView(label(listDate(c.last.date), if (unread) R.color.accent else R.color.muted, 12f, bold = unread).apply {
+                    maxLines = 1; setPadding(0, 0, 0, 0) }, LinearLayout.LayoutParams(-2, -2))   // its own width: the column fits the date
+                if (unread) addView(label(if (c.unread > 99) "99+" else c.unread.toString(), R.color.background, 12f, bold = true).apply {
+                    gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER; setPadding(dp(6), 0, dp(6), 0)
+                    minWidth = dp(22); minimumWidth = dp(22); minHeight = dp(22); minimumHeight = dp(22)
+                    background = GradientDrawable().apply { cornerRadius = dp(11).toFloat(); setColor(col(R.color.accent)) }
+                }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
+            }, LinearLayout.LayoutParams(-2, -2))
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(line)
+            // A grey line, clearly there but quieter than the text.
+            if (!last) addView(View(context).apply { setBackgroundColor(android.content.res.ColorStateList.valueOf(col(R.color.muted)).withAlpha(0x55).defaultColor) },
+                LinearLayout.LayoutParams(-1, dp(1)).apply { marginStart = dp(4 + 48 + 14) })
+            isSelected = isPicked
+            contentDescription = listOfNotNull(if (isPicked) getString(R.string.recents_selected, 1) else null, who, if (unread) getString(R.string.unread_n, c.unread) else null,
+                preview, listDate(c.last.date)).joinToString(", ")
+        }
+    }
+
+
 
     private fun openThread(address: String, thread: Long? = null) {
         startActivity(Intent(this, ThreadActivity::class.java).putExtra(ThreadActivity.EXTRA_ADDRESS, address)
@@ -412,6 +818,21 @@ class MainActivity : Activity() {
             BleCentral.State.HANDSHAKING, BleCentral.State.CONNECTING -> getString(R.string.state_connecting)
         }, if (connected) R.color.ok else R.color.muted))
         if (st != null) phone.addView(label(getString(R.string.battery, st.optInt("battery"), if (st.optBoolean("charging")) " ⚡" else ""), R.color.muted, 14f))
+        // The low-battery alert for the Android phone, chosen here: off or a level; it also alerts at every 5 % below.
+        if (app.identity.isPaired) {
+            val n = app.notifier
+            fun word(v: Int) = if (v == 0) getString(R.string.battery_alert_off) else "$v %"
+            phone.addView(row(
+                label(getString(R.string.battery_alert), size = 15f).weight(),
+                button(word(n.batteryAlert), Look.TONAL, iconId = R.drawable.ic_battery_alert) {
+                    val choices = BatteryAlert.CHOICES
+                    AlertDialog.Builder(this).setTitle(R.string.battery_alert)
+                        .setSingleChoiceItems(choices.map(::word).toTypedArray(), choices.indexOf(n.batteryAlert)) { d, w -> n.batteryAlert = choices[w]; d.dismiss(); render() }
+                        .setNegativeButton(android.R.string.cancel, null).show()
+                }.apply { contentDescription = getString(R.string.battery_alert) + ", " + word(n.batteryAlert) },
+            ))
+            phone.addView(label(getString(R.string.battery_alert_help), R.color.muted, 12f))
+        }
         // The Android phone cannot bridge call audio (Android 8-10, or its software gives none): calls stay on it.
         when (st?.optJSONObject("helper")?.optString("audio")) {
             "unavailable" -> phone.addView(label(getString(R.string.audio_unavailable), R.color.warn, 13f))
@@ -430,8 +851,10 @@ class MainActivity : Activity() {
         // Not paired yet: how to start, in plain words.
         if (!app.identity.isPaired) phone.addView(label(getString(R.string.pair_guide), R.color.muted, 13f))
         phone.addView(row(
-            pill(getString(if (app.identity.isPaired) R.string.pair_again else R.string.pair)) { startActivity(Intent(this, PairActivity::class.java)) },
-            *(if (app.identity.isPaired) arrayOf(pill(getString(R.string.unpair), secondary = true, colorId = R.color.bad) {
+            button(getString(if (app.identity.isPaired) R.string.pair_again else R.string.pair), if (app.identity.isPaired) Look.TONAL else Look.FILLED) {
+                startActivity(Intent(this, PairActivity::class.java))
+            },
+            *(if (app.identity.isPaired) arrayOf(button(getString(R.string.unpair), Look.TEXT, R.color.bad) {
                 AlertDialog.Builder(this).setMessage(R.string.unpair_confirm).setPositiveButton(R.string.unpair) { _, _ -> app.unpair() }
                     .setNegativeButton(android.R.string.cancel, null).show()
             }) else emptyArray()),
@@ -468,14 +891,18 @@ class MainActivity : Activity() {
             val sims = s.sims
             if (sims.size > 1) {
                 val dataSub = net?.optInt("dataSub", -1) ?: -1
-                sw.addView(row(label(getString(R.string.data_sim), size = 16f).weight(), *sims.map { sim ->
-                    pill(sim.name.ifEmpty { getString(R.string.sim_n, sim.slot + 1) }, secondary = sim.sub != dataSub) { if (sim.sub != dataSub) s.setDataSim(sim.sub) }
+                // The data SIM: one choice per SIM, the chosen one filled.
+                sw.addView(label(getString(R.string.data_sim), size = 16f).apply { setPadding(0, dp(10), 0, 0) })
+                sw.addView(evenRow(*sims.map { sim ->
+                    button(sim.name.ifEmpty { getString(R.string.sim_n, sim.slot + 1) }, if (sim.sub == dataSub) Look.FILLED else Look.TONAL) {
+                        if (sim.sub != dataSub) s.setDataSim(sim.sub)
+                    }.apply { isEnabled = s.netPending == null; isSelected = sim.sub == dataSub }
                 }.toTypedArray()))
             }
             for (sim in sims) {
                 val mode = net?.optJSONArray("rat")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.firstOrNull { it.optInt("slot") == sim.slot }?.optString("mode") }
                 sw.addView(row(label(getString(R.string.network_mode, sim.name.ifEmpty { getString(R.string.sim_n, sim.slot + 1) }), size = 16f).weight(),
-                    pill(mode ?: "–", secondary = true) {
+                    button(mode ?: "–", Look.TONAL) {
                         val modes = arrayOf("5G", "4G", "3G", "2G")
                         AlertDialog.Builder(this).setItems(modes) { _, w -> s.setNetworkMode(sim.slot, modes[w]) }.show()
                     }))
@@ -485,22 +912,25 @@ class MainActivity : Activity() {
             box.addView(sw)
         }
 
+        // Calls: in the Phone app (a calling account per SIM) or in this app's own call screen.
+        box.addView(callsCard())
+
         // This phone
         val me = card()
         me.addView(label(getString(R.string.this_phone).uppercase(), R.color.accent, 12f, bold = true))
         val pm = getSystemService(PowerManager::class.java)
-        if (!pm.isIgnoringBatteryOptimizations(packageName)) me.addView(pill(getString(R.string.allow_background), secondary = true) {
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) me.addView(button(getString(R.string.allow_background), Look.OUTLINED) {
             runCatching { startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))) }
         })
-        if (!app.hasLinkPermissions()) me.addView(pill(getString(R.string.grant_permissions)) { askPermissions() })
+        if (!app.hasLinkPermissions()) me.addView(button(getString(R.string.grant_permissions)) { askPermissions() })
         app.link.roundTripMs?.let { me.addView(label(getString(R.string.round_trip, it), R.color.muted, 13f)) }
         me.addView(row(
-            pill(getString(R.string.report_title)) { ReportUi.send(this) { ClientReport.build(app) } },
+            button(getString(R.string.report_title), Look.TONAL) { ReportUi.send(this) { ClientReport.build(app) } },
         ))
         me.addView(label(getString(R.string.report_hint), R.color.muted, 13f))
         me.addView(row(
-            pill(getString(R.string.link_log), secondary = true) { showLog() },
-            *(if (connected) arrayOf(pill(getString(R.string.selftest), secondary = true) { s.runSelftest() }) else emptyArray()),
+            button(getString(R.string.link_log), Look.TEXT) { showLog() },
+            *(if (connected) arrayOf(button(getString(R.string.selftest), Look.TEXT) { s.runSelftest() }) else emptyArray()),
         ))
         s.selftest?.let { t ->
             val m = t.optJSONArray("methods")
@@ -512,6 +942,54 @@ class MainActivity : Activity() {
         sv.post { sv.scrollTo(0, keepScroll) }
     }
 
+    /**
+     * "Use the Phone app for calls" and what it still needs: the calling accounts turned on in the Phone app, and the
+     * Phone permission (to see which accounts are on, to dial from this app's keypad through the Phone app and to open
+     * its call screen). Until an account is on, calls use this app's own call screen, which the card says. Also, for
+     * that own screen: whether Android lets it wake the screen for an incoming call (full-screen notifications).
+     */
+    private fun callsCard(): View {
+        val c = card()
+        c.addView(label(getString(R.string.calls_title).uppercase(), R.color.accent, 12f, bold = true))
+        val t = app.telecom
+        c.addView(Switch(this).apply {
+            text = getString(R.string.use_phone_app); textSize = 16f; setTextColor(col(R.color.text)); isChecked = t.usePhoneApp
+            setPadding(0, dp(8), 0, dp(8))
+            setOnCheckedChangeListener { _, v ->
+                t.usePhoneApp = v
+                if (v && !t.hasPhonePermissions()) requestPermissions(t.phonePermissions, 2)
+            }
+        })
+        if (!t.usePhoneApp) c.addView(label(getString(R.string.phone_app_off), R.color.muted, 13f))
+        else {
+            val accounts = t.phoneAccounts()
+            val off = accounts.filter { !it.second }
+            when {
+                accounts.isEmpty() -> c.addView(label(getString(R.string.phone_app_turn_on), R.color.warn, 13f))
+                off.isEmpty() -> c.addView(label(getString(R.string.phone_app_ready), R.color.ok, 13f))
+                off.size == accounts.size -> c.addView(label(getString(R.string.phone_app_turn_on), R.color.warn, 13f))
+                else -> c.addView(label(getString(R.string.phone_app_turn_on_some, off.joinToString { it.first }), R.color.warn, 13f))
+            }
+            if (off.isNotEmpty() || accounts.isEmpty())
+                c.addView(button(getString(R.string.phone_app_open_accounts), iconId = R.drawable.ic_call) { t.openCallingAccounts(this) })
+            if (!t.hasPhonePermissions()) {
+                c.addView(label(getString(R.string.phone_app_permission), R.color.muted, 13f))
+                c.addView(button(getString(R.string.allow_phone_calls), Look.OUTLINED) { requestPermissions(t.phonePermissions, 2) })
+            }
+        }
+        // Calls in this app's own screen ring through a full-screen notification: from Android 14 that wakes the screen
+        // only with "Full screen notifications" allowed for the app.
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 34 && !nm.canUseFullScreenIntent()) {
+            c.addView(label(getString(R.string.full_screen_off), R.color.warn, 13f).apply { setPadding(0, dp(10), 0, dp(2)) })
+            c.addView(button(getString(R.string.full_screen_allow), Look.OUTLINED) {
+                runCatching { startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))) }
+                    .recoverCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+            })
+        }
+        return c
+    }
+
     private fun showLog() {
         val t = TextView(this).apply { text = app.journal.text; textSize = 11f; typeface = Typeface.MONOSPACE; setTextIsSelectable(true); setPadding(dp(16), dp(8), dp(16), dp(8)) }
         AlertDialog.Builder(this).setTitle(R.string.link_log).setView(ScrollView(this).apply { addView(t) })
@@ -521,7 +999,10 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val SELECTION_TAG = "selection"
         const val EXTRA_TAB = "tab"; const val EXTRA_NUMBER = "number"
         const val TAB_RECENTS = 0; const val TAB_CONTACTS = 1; const val TAB_KEYPAD = 2; const val TAB_MESSAGES = 3; const val TAB_LINK = 4
+        private val TAB_NAMES = listOf(R.string.tab_recents, R.string.tab_contacts, R.string.tab_keypad, R.string.tab_messages, R.string.tab_link)
+        private val TAB_ICONS = listOf(R.drawable.ic_history, R.drawable.ic_person, R.drawable.ic_dialpad, R.drawable.ic_chat, R.drawable.ic_link)
     }
 }

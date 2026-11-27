@@ -1,5 +1,7 @@
 package app.tether.client
 
+import app.tether.client.link.BleCentral
+import app.tether.client.model.BatteryAlert
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -36,6 +38,62 @@ class Notifier(private val app: ClientApp) {
         nm.createNotificationChannel(NotificationChannel(CH_ONGOING, app.getString(R.string.channel_ongoing), NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(CH_SMS, app.getString(R.string.channel_messages), NotificationManager.IMPORTANCE_HIGH))
         nm.createNotificationChannel(NotificationChannel(CH_MISSED, app.getString(R.string.channel_missed), NotificationManager.IMPORTANCE_DEFAULT))
+        // Its own category, apart from texts: it can be silenced or given its own sound without touching them.
+        nm.createNotificationChannel(NotificationChannel(CH_BATTERY, app.getString(R.string.channel_battery), NotificationManager.IMPORTANCE_DEFAULT))
+    }
+
+    // ------------------------------------------------------------------ the Android phone's battery
+
+    private val alertPrefs = app.getSharedPreferences("alerts", Context.MODE_PRIVATE)
+
+    /** The low-battery alert level for the Android phone (0 = off). */
+    var batteryAlert: Int
+        get() = alertPrefs.getInt(PREF_BATTERY, BatteryAlert.DEFAULT)
+        set(v) { alertPrefs.edit().putInt(PREF_BATTERY, v).remove(PREF_BATTERY_STEP).apply(); syncBattery() }
+
+    /**
+     * Low battery on the Android phone: a notification at the chosen level and again at every 5 % below it (only then:
+     * it shows the level at that step and does not change in between); gone when it charges or rises above the level. Only from a live link (a remembered status may be
+     * old). The step last alerted is kept, so a restart does not alert again for the same step.
+     * No polling, timer or wake-up of its own: it runs on the status the Android phone already sends over the link
+     * (at each 1 % of battery) and returns at once while the battery is above the level.
+     */
+    fun syncBattery() {
+        if (app.linkState != BleCentral.State.CONNECTED) return
+        val st = app.state.status ?: return
+        val level = st.optInt("battery", -1)
+        val step = BatteryAlert.step(level, st.optBoolean("charging"), batteryAlert)
+        val last = alertPrefs.getInt(PREF_BATTERY_STEP, -1).takeIf { it >= 0 }
+        if (step == null) {
+            if (last != null) { alertPrefs.edit().remove(PREF_BATTERY_STEP).apply(); nm.cancel(TAG_BATTERY, 0); nm.cancel(TAG_BATTERY, 1) }
+            return
+        }
+        // Posted only at a new 5 % step (it shows the level at that moment); in between nothing changes, so it costs
+        // nothing between steps and does not tick through every percent.
+        if (!BatteryAlert.shouldAlert(step, last)) return
+        alertPrefs.edit().putInt(PREF_BATTERY_STEP, step).apply()
+        val who = app.identity.peerName ?: app.getString(R.string.android_phone)
+        // The group's summary: Android 15+ folds a group without one (a "sparse" group) into the app's bundle with the
+        // texts; with a summary the group stays apart, shown as one card (a group of one shows only its child).
+        nm.notify(TAG_BATTERY, 1, Notification.Builder(app, CH_BATTERY)
+            .setSmallIcon(R.drawable.ic_battery_alert)
+            .setColor(app.getColor(R.color.bad))
+            .setContentTitle(app.getString(R.string.battery_low_title, who, level))
+            .setGroup(GROUP_BATTERY).setGroupSummary(true)
+            .setGroupAlertBehavior(Notification.GROUP_ALERT_CHILDREN)
+            .setAutoCancel(true)
+            .build())
+        nm.notify(TAG_BATTERY, 0, Notification.Builder(app, CH_BATTERY)
+            .setSmallIcon(R.drawable.ic_battery_alert)
+            .setColor(app.getColor(R.color.bad))
+            .setContentTitle(app.getString(R.string.battery_low_title, who, level))
+            .setContentText(app.getString(R.string.battery_low_text, batteryAlert))
+            .setContentIntent(pi(Intent(app, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.TAB_LINK), 3))
+            .setCategory(Notification.CATEGORY_STATUS)
+            // Its own group (with the summary above): Android bundles an app's ungrouped notifications together.
+            .setGroup(GROUP_BATTERY).setGroupAlertBehavior(Notification.GROUP_ALERT_CHILDREN)
+            .setAutoCancel(true)
+            .build())
     }
 
     private fun pi(i: Intent, req: Int) = PendingIntent.getActivity(app, req, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -104,6 +162,7 @@ class Notifier(private val app: ClientApp) {
         if (list.none { it.id == m.id }) list.add(m)
         val me = Person.Builder().setName(app.getString(R.string.me)).build()
         val sender = Person.Builder().setName(from).setKey(m.addr).build()
+        val shortcut = conversationShortcut(m, from, sender)
         val style = Notification.MessagingStyle(me).setConversationTitle(sim?.let { "$from · $it" })
         list.takeLast(8).forEach { style.addMessage(it.body, it.date, sender) }
         val open = pi(Intent(app, ThreadActivity::class.java).putExtra(ThreadActivity.EXTRA_THREAD, m.thread).putExtra(ThreadActivity.EXTRA_ADDRESS, m.addr)
@@ -116,11 +175,30 @@ class Notifier(private val app: ClientApp) {
             .setSmallIcon(R.drawable.ic_tether)
             .setStyle(style)
             .setCategory(Notification.CATEGORY_MESSAGE)
+            .apply { shortcut?.let { setShortcutId(it) } }
             .setContentIntent(open)
             .addAction(reply).addAction(read)
             .setAutoCancel(true)
             .build())
     }
+
+    /**
+     * A long-lived shortcut for the conversation, so Android shows its texts as a conversation: in the shade's
+     * Conversations section, apart from the app's other notifications (the battery alert), as phones' messaging apps do.
+     * Null when Android refuses it (the text is still shown, among the app's notifications).
+     */
+    private fun conversationShortcut(m: Sms, from: String, sender: Person): String? = if (Build.VERSION.SDK_INT < 30) null else runCatching {
+        val id = "thread-${m.thread}"
+        val open = Intent(app, ThreadActivity::class.java).setAction(Intent.ACTION_VIEW)
+            .putExtra(ThreadActivity.EXTRA_THREAD, m.thread).putExtra(ThreadActivity.EXTRA_ADDRESS, m.addr)
+        app.getSystemService(android.content.pm.ShortcutManager::class.java).pushDynamicShortcut(
+            android.content.pm.ShortcutInfo.Builder(app, id)
+                .setShortLabel(from.take(24)).setLongLabel(from)
+                .setIcon(android.graphics.drawable.Icon.createWithResource(app, R.drawable.ic_person))
+                .setPerson(sender).setLongLived(true).setIntent(open)
+                .build())
+        id
+    }.getOrNull()
 
     fun clearSms(thread: Long) { shown.remove(thread); nm.cancel(TAG_SMS, thread.toInt()) }
     fun clearSmsIds(ids: List<Long>) {
@@ -128,18 +206,48 @@ class Notifier(private val app: ClientApp) {
         for (t in shown.keys.toList()) { val l = shown[t]!!; if (l.removeAll { it.id in gone } && l.isEmpty()) clearSms(t) }
     }
 
-    fun clearAll() { shown.clear(); nm.cancelAll() }
+    fun clearAll() { shown.clear(); remoteShown.clear(); nm.cancelAll() }
+
+    /** Calls on another device shown now, with the text shown (re-posted only when it changes). */
+    private val remoteShown = HashMap<String, String>()
+
+    /**
+     * A call whose audio is on another device (the Android phone took it, it was answered there or on another client)
+     * stays in the notification bar with **Move here**, so the way back to it is not only the banner inside the app;
+     * a tap opens the app. Quiet (no sound, no pop-up). Gone when the call ends or comes here. Called on every change.
+     */
+    fun syncRemoteCalls(remote: Map<String, app.tether.client.model.Call>) {
+        for (cid in remoteShown.keys - remote.keys) nm.cancel(TAG_REMOTE, cid.hashCode())
+        remoteShown.keys.retainAll(remote.keys)
+        for ((cid, r) in remote) {
+            val text = app.getString(R.string.call_elsewhere, app.displayName(r.num), r.where ?: app.getString(R.string.another_device))
+            if (remoteShown[cid] == text) continue
+            remoteShown[cid] = text
+            nm.notify(TAG_REMOTE, cid.hashCode(), Notification.Builder(app, CH_ONGOING)
+                .setSmallIcon(R.drawable.ic_tether)
+                .setContentTitle(app.getString(R.string.call_on_other_device))
+                .setContentText(text)
+                .setCategory(Notification.CATEGORY_STATUS)
+                .setOngoing(true)
+                .setContentIntent(pi(Intent(app, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), cid.hashCode() + 3))
+                .addAction(Notification.Action.Builder(null, app.getString(R.string.move_here),
+                    br(ACTION_TAKE, cid.hashCode() + 4) { putExtra(EXTRA_CID, cid) }).build())
+                .build())
+        }
+    }
 
     companion object {
-        const val CH_LINK = "link"; const val CH_CALLS = "calls"; const val CH_ONGOING = "ongoing"; const val CH_SMS = "messages"; const val CH_MISSED = "missed"
-        const val TAG_CALL = "call"; const val TAG_SMS = "sms"; const val TAG_MISSED = "missed"
+        const val CH_LINK = "link"; const val CH_CALLS = "calls"; const val CH_ONGOING = "ongoing"; const val CH_SMS = "messages"; const val CH_MISSED = "missed"; const val CH_BATTERY = "battery"
+        const val TAG_CALL = "call"; const val TAG_SMS = "sms"; const val TAG_MISSED = "missed"; const val TAG_REMOTE = "remote"; const val TAG_BATTERY = "battery"; const val GROUP_BATTERY = "battery"
+        private const val PREF_BATTERY = "battery_alert"; private const val PREF_BATTERY_STEP = "battery_alert_step"
+        const val ACTION_TAKE = "app.tether.client.TAKE"; const val EXTRA_CID = "cid"
         const val ACTION_DECLINE = "app.tether.client.DECLINE"; const val ACTION_REPLY = "app.tether.client.REPLY"
         const val ACTION_READ = "app.tether.client.READ"; const val ACTION_CALL_BACK = "app.tether.client.CALL_BACK"
         const val EXTRA_THREAD = "thread"; const val EXTRA_NUMBER = "number"; const val EXTRA_SUB = "sub"; const val KEY_REPLY = "reply"
     }
 }
 
-/** Notification buttons: decline a call, reply to or mark a conversation read, call back. */
+/** Notification buttons: decline a call, reply to or mark a conversation read, call back, move a call here. */
 class NotificationActions : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext as ClientApp
@@ -158,6 +266,8 @@ class NotificationActions : BroadcastReceiver() {
             }
             Notifier.ACTION_READ -> intent.getLongExtra(Notifier.EXTRA_THREAD, -1).takeIf { it >= 0 }?.let { app.state.markRead(it); app.notifier.clearSms(it) }
             Notifier.ACTION_CALL_BACK -> intent.getStringExtra(Notifier.EXTRA_NUMBER)?.let { app.dial(it, sub) }
+            // Move here from the notification of a call on another device.
+            Notifier.ACTION_TAKE -> intent.getStringExtra(Notifier.EXTRA_CID)?.let { app.calls.take(it) }
         }
     }
 }
