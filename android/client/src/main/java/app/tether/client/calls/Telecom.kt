@@ -534,8 +534,12 @@ open class TetherConnectionService : ConnectionService() {
                 app.getString(R.string.err_not_connected), "link down"))
         }
         val conn = TetherConnection(app, local, inPhoneApp)
-        conn.setDialing()
+        // Initialized first: setInitialized() sets the state to NEW, so after setDialing() it undid the dialing state.
+        // The call then stayed NEW until it connected, and the call audio (which runs while a call is dialing) did not
+        // start: neither the network's ringback and announcements from the Android phone nor the local ringback
+        // played until the other side answered.
         conn.setInitialized()
+        conn.setDialing()
         val number = request.address?.schemeSpecificPart.orEmpty()
         conn.setAddress(request.address, TelecomManager.PRESENTATION_ALLOWED)
         val attached = app.telecom.attach(local, conn)
