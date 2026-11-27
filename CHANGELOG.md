@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.3.0 — 2026-11-27
+
+This fork ships the Android apps only (the SIM phone app and Tether Client; no iPhone app). It includes everything
+in the original project's 1.2.5, below, plus these changes:
+
 - Android client: **select texts in a conversation**. A long press selects a text (tap more to add them); the header
   then shows how many, with Star / Unstar, Copy (the selected texts together, oldest first) and Delete (asks first).
   With one selected: Select text, to copy part of it (also by holding the selected text again, as Telegram does),
