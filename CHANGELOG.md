@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.3.1 — 2026-11-27
+
 - Android client: **call sounds from the start of an outgoing call.** Until the other side answered, nothing played:
   not the network's ringback or announcements ("the number you dialed is switched off…") coming from the SIM phone,
   nor the client's own ringback. The call was reset from "dialing" to "new" as it was created, and the call audio
