@@ -6,7 +6,8 @@
   default): when the SIM phone is not charging and its battery falls to that level, a notification says so, and it
   alerts again at every 5 % below it (nothing changes in between). It goes away when the phone charges or rises above
   the level. It has its own notification category, "Android phone battery", and its own group in the notification
-  shade, apart from texts.
+  shade, apart from texts. Texts are now conversation notifications (a shortcut per conversation), so Android 11+
+  lists them in the shade's Conversations section, apart from the app's other notifications such as this alert.
 
 - Android client: **the Messages list looks like a phone's messaging app**: a thin line between conversations; the
   date on the right (the time today, "Yesterday", the weekday this week, else the date) and under it a round count

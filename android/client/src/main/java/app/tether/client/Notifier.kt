@@ -152,6 +152,7 @@ class Notifier(private val app: ClientApp) {
         if (list.none { it.id == m.id }) list.add(m)
         val me = Person.Builder().setName(app.getString(R.string.me)).build()
         val sender = Person.Builder().setName(from).setKey(m.addr).build()
+        val shortcut = conversationShortcut(m, from, sender)
         val style = Notification.MessagingStyle(me).setConversationTitle(sim?.let { "$from · $it" })
         list.takeLast(8).forEach { style.addMessage(it.body, it.date, sender) }
         val open = pi(Intent(app, ThreadActivity::class.java).putExtra(ThreadActivity.EXTRA_THREAD, m.thread).putExtra(ThreadActivity.EXTRA_ADDRESS, m.addr)
@@ -164,11 +165,30 @@ class Notifier(private val app: ClientApp) {
             .setSmallIcon(R.drawable.ic_tether)
             .setStyle(style)
             .setCategory(Notification.CATEGORY_MESSAGE)
+            .apply { shortcut?.let { setShortcutId(it) } }
             .setContentIntent(open)
             .addAction(reply).addAction(read)
             .setAutoCancel(true)
             .build())
     }
+
+    /**
+     * A long-lived shortcut for the conversation, so Android shows its texts as a conversation: in the shade's
+     * Conversations section, apart from the app's other notifications (the battery alert), as phones' messaging apps do.
+     * Null when Android refuses it (the text is still shown, among the app's notifications).
+     */
+    private fun conversationShortcut(m: Sms, from: String, sender: Person): String? = if (Build.VERSION.SDK_INT < 30) null else runCatching {
+        val id = "thread-${m.thread}"
+        val open = Intent(app, ThreadActivity::class.java).setAction(Intent.ACTION_VIEW)
+            .putExtra(ThreadActivity.EXTRA_THREAD, m.thread).putExtra(ThreadActivity.EXTRA_ADDRESS, m.addr)
+        app.getSystemService(android.content.pm.ShortcutManager::class.java).pushDynamicShortcut(
+            android.content.pm.ShortcutInfo.Builder(app, id)
+                .setShortLabel(from.take(24)).setLongLabel(from)
+                .setIcon(android.graphics.drawable.Icon.createWithResource(app, R.drawable.ic_person))
+                .setPerson(sender).setLongLived(true).setIntent(open)
+                .build())
+        id
+    }.getOrNull()
 
     fun clearSms(thread: Long) { shown.remove(thread); nm.cancel(TAG_SMS, thread.toInt()) }
     fun clearSmsIds(ids: List<Long>) {
