@@ -140,6 +140,20 @@ fun Context.dayName(day: Long): String {
         if (thisYear) DateUtils.FORMAT_NO_YEAR else DateUtils.FORMAT_SHOW_YEAR)
 }
 
+/** A conversation's date: the time today, "Yesterday", the weekday this week, else the date (the year when not this one). */
+fun Context.listDate(ms: Long): String {
+    val day = dayStart(ms); val today = dayStart(System.currentTimeMillis())
+    return when {
+        day == today -> android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_TIME)
+        today - day < 6 * 86_400_000L + 3_600_000L && day != dayStart(today - 12 * 3600_000L) ->
+            android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_WEEKDAY or android.text.format.DateUtils.FORMAT_ABBREV_WEEKDAY)
+        day == dayStart(today - 12 * 3600_000L) -> getString(R.string.recents_yesterday)
+        java.util.Calendar.getInstance().apply { timeInMillis = ms }.get(java.util.Calendar.YEAR) == java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) ->
+            android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_NO_YEAR or android.text.format.DateUtils.FORMAT_ABBREV_MONTH)
+        else -> android.text.format.DateUtils.formatDateTime(this, ms, android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_NUMERIC_DATE)
+    }
+}
+
 /** The words for a [Problem] (its detail comes from the Android phone as is). */
 fun Context.describe(p: Problem): String {
     val base = when (p.kind) {

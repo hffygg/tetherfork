@@ -82,6 +82,11 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".ui.StarredActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".ui.PairActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
