@@ -82,6 +82,33 @@ class PlayoutTest {
     }
 
     /** A lost frame filled by the decoder's concealment takes its place on the timeline. */
+    @Test fun aShortfallIsFilledByTheDecodersConcealment() {
+        val b = PlayoutBuffer(16000)
+        var asked = 0
+        b.concealer = { asked++; ShortArray(320) { 8000 } }   // 20 ms of the decoder's concealment, at 0.24
+        val frame = ShortArray(320) { 1000 }
+        var t = 1_000_000_000L
+        val out = FloatArray(160)
+        repeat(10) { b.push(frame, at = t); t += 20_000_000 }   // primed
+        while (b.buffered > 0) b.pull(out, 160)
+        b.pull(out, 160)   // 10 ms short: the decoder fills it at full level
+        assertTrue(asked >= 1)
+        assertEquals(8000 / 32768f, out[100], 1e-4f)
+        assertEquals(160, b.decoderConcealedSamples)
+    }
+
+    @Test fun withoutADecoderTheLastAudioIsRepeated() {
+        val b = PlayoutBuffer(16000)
+        val frame = ShortArray(320) { 1000 }
+        var t = 1_000_000_000L
+        val out = FloatArray(160)
+        repeat(10) { b.push(frame, at = t); t += 20_000_000 }
+        while (b.buffered > 0) b.pull(out, 160)
+        b.pull(out, 160)
+        assertEquals(0, b.decoderConcealedSamples)
+        assertTrue(out[10] > 0f && out[10] <= 1000 / 32768f)
+    }
+
     @Test fun concealedFramesKeepTheTimeline() {
         val b = PlayoutBuffer(16000)
         val frame = ShortArray(320) { 1000 }
