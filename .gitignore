@@ -5,6 +5,7 @@ examples/kotlin-jvm/build/
 android/**/build/
 android/local.properties
 android/.kotlin/
+android/.idea/
 *.apk
 *.dex
 tools/out/

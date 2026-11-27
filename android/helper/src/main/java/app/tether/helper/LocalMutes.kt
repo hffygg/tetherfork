@@ -50,11 +50,19 @@ object LocalMutes {
     fun wantCheck(memory: Memory?): Boolean = memory != Memory.OK
 
     /**
+     * Whether this phone has any mic mute that leaves the injected uplink alone: the vendor's key, or Android's mic mute
+     * where the vendor's HAL does not mute the injected voice with it ([CallAudio.Silence.telecomMuteKillsUplink]).
+     */
+    fun canMute(silence: CallAudio.Silence): Boolean = silence.vendorMicKeys || !silence.telecomMuteKillsUplink
+
+    /**
      * Helper side: one way to mute the mic per vendor (never both: each extra mute is one more way to silence the
-     * uplink): the vendor's keys where it has them, else Android's mic mute.
+     * uplink): the vendor's keys where it has them, else Android's mic mute, but never where that mutes the injected
+     * voice too (Qualcomm: its HAL mutes the whole Tx path, and VOICE_UPLINK may still show the voice, so a check
+     * cannot be trusted): no mic mute at all then.
      */
     fun plan(silence: CallAudio.Silence, micMute: Boolean, check: Boolean): Plan =
-        if (!micMute) Plan.NONE
+        if (!micMute || !canMute(silence)) Plan.NONE
         else Plan(vendorMic = silence.vendorMicKeys, telecomMic = !silence.vendorMicKeys, check = check)
 
     /**
@@ -71,6 +79,7 @@ object LocalMutes {
     /** The user's "mute" setting: as [plan], checked until this phone gave an answer that holds for this mute. */
     fun manualPlan(silence: CallAudio.Silence, memory: Memory?): Plan {
         val p = plan(silence, memory != Memory.BREAKS_UPLINK, check = true)
+        if (!p.micMuted) return Plan.NONE
         return p.copy(check = memory == null || (memory == Memory.UNVERIFIED && !keepWhenBlind(p, silence)))
     }
 

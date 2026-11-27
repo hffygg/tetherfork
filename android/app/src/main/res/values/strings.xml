@@ -96,6 +96,7 @@
     <string name="audio_blocked">This phone\'s software gave Tether no call audio in a call (the call sounded like silence to it), so calls are not bridged here: they are still answered, placed and ended from the iPhone, but you hear and speak on this phone. A system update, or a self-test during a call that hears the call, turns call audio back on. If calls on the phone itself have no sound either, restart the phone once.</string>
     <string name="audio_needs_android13">Call audio needs Android 13 or later. On this phone, calls are still answered, placed and ended from the iPhone, but their audio stays on this phone.</string>
     <string name="mic_mute_on">On: Tether checks during each call that your voice still reaches the other side and turns the mute off if it does not.</string>
+    <string name="mic_mute_unsupported">On, but not used on this phone: here Android\'s microphone mute also silences your voice for the other side, so the phone\'s microphone stays on during calls.</string>
     <string name="mic_mute_blocked">On, but not used on this phone: muting the microphone silenced your voice for the other side. Switch it off and on to try again.</string>
     <string name="helper_capture">capture %1$s</string>
     <string name="mic_title">This phone\'s microphone during bridged calls</string>

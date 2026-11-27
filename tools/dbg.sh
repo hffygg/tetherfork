@@ -8,6 +8,7 @@
 #   tools/dbg.sh net [data|hotspot|bt on|off] | airplane on|off | share on|off|loopback|noloopback|state
 #   tools/dbg.sh drop (close live sessions from the Android side)
 #   tools/dbg.sh inject_ms 20..200|off (uplink playback buffer cap for the next calls; default 40)
+#   tools/dbg.sh inject auto|intercept|telephony_tx|policy_mix|state (uplink injection method for the next calls)
 #   tools/dbg.sh mic_mute on|off|state (mute the A54's own mic during bridged calls; default off; prints the uplink check)
 #   tools/dbg.sh mic auto|mute|open|state [keep] (the A54's own mic during bridged calls: auto = a redirect audio mode, else the vendor mic key; keep: do not forget what was remembered)
 #   tools/dbg.sh linklog [n] | only none|off | forget_kind <kind> | contact_test | test_contact +1000000000x | star <id> on|off
@@ -39,6 +40,7 @@ case "$cmd" in
   loopback_call) if [ "$1" = "during-sync" ]; then extra="--es sync full"; elif [ -n "$1" ]; then extra="--es mode $1"; fi;;
   only) extra="--es kind ${1:-off}";;
   inject_ms) extra="--es ms ${1:-off}";;
+  inject) extra="--es m ${1:-state}";;
   mic_mute) extra="--es on ${1:-state}";;
   mic) extra="--es on ${1:-state}${2:+ --es keep $2}";;
   forget_kind) extra="--es kind $1";;

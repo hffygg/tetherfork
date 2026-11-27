@@ -245,14 +245,21 @@ class DebugReceiver : BroadcastReceiver() {
             app.prefs.edit().apply { if (v == null) remove("inject_ms") else putInt("inject_ms", v.coerceIn(20, 200)) }.apply()
             "inject_ms=${app.prefs.getInt("inject_ms", 40)}"
         }
+        // inject auto|intercept|telephony_tx|policy_mix: the uplink injection method for the next calls (the self-test's choice).
+        "inject" -> {
+            val m = intent.getStringExtra("m")
+            if (m == "auto") app.prefs.edit().remove("inject").apply()
+            else if (m in setOf("intercept", "telephony_tx", "policy_mix")) app.prefs.edit().putString("inject", m).apply()
+            "inject=${app.prefs.getString("inject", "auto")}"
+        }
         // mic_mute on|off|state: "mute this phone's mic during bridged calls" (on/off also forget the remembered check result).
         "mic_mute" -> {
             when (intent.getStringExtra("on")) { "on" -> app.hub.audio.setMicSetting(true); "off" -> app.hub.audio.setMicSetting(false) }
             app.hub.pushStatus()
             "micMute=${app.hub.audio.micSetting} remembered=${app.hub.audio.memory()?.wire ?: "none"} helper=${app.hub.audio.helperStatus()} uplink=${app.hub.helper.lastUplink}"
         }
-        // mic auto|mute|open|state [keep]: "this phone's microphone during bridged calls" (a new choice forgets what was
-        // remembered, unless `keep`).
+        // mic auto|mute|open|state [keep]: "this phone's microphone during bridged calls" (as the app's picker: a new choice
+        // forgets the mute's result, the same choice again also the redirect modes'; `keep` forgets nothing).
         "mic" -> {
             val keep = intent.getStringExtra("keep") != null
             intent.getStringExtra("on")?.let { w -> MicPath.Setting.entries.firstOrNull { it.wire == w } }?.let { app.hub.audio.setMic(it, forget = !keep) }

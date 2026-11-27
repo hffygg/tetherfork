@@ -164,6 +164,34 @@
     The call banner and the error banner show a ripple when tapped.
   - Link: the data SIM is a row of choices with the chosen one filled; the quieter actions use quieter styles.
 
+## 1.2.5 — 2026-11-25
+
+- iPhone: Tether sets its CallKit provider up again when iOS restarted its call service under the running app. Until
+  now every call then failed until the app was force-quit: calls dialed on the iPhone ended at once ("unknown call
+  provider") and incoming calls rang but CallKit never activated their audio (no microphone, no sound). Tether checks
+  this whenever it comes to the front, after an audio-system reset and on a refused request, then tries once more;
+  the link log says `CallKit: … provider set up again`. The Android client uses Android's Telecom and is not
+  affected (#18, thanks @arashfarahani).
+- Android phone, Qualcomm phones whose audio configuration wires `incall_music_uplink` without an `afe-proxy-playback`
+  mixer path (seen on a Redmi Note 8 with a custom Android 16): the iPhone's voice is now sent into the call through
+  the in-call music route (`telephony_tx`). The interception API's uplink went nowhere there (the HAL logged "unable
+  to find path 'afe-proxy-playback afe-proxy'"), so the other side heard only what the Android phone's own microphone
+  picked up, and only when it lay close. The self-test and the in-call check read the same proxy and reported the
+  voice as reaching the call. Tether reads the vendor's mixer configuration once, never injects through the
+  interception API there (not even when an earlier self-test chose it), and says why in the link log (#18, thanks
+  @arashfarahani).
+- Android phone, Qualcomm without a maker's microphone switch (Xiaomi, Redmi, Poco, OnePlus, Samsung with a Qualcomm
+  chip and others): **Muted** no longer uses Android's microphone mute. Its audio system mutes the whole uplink with
+  it, the iPhone's voice included, while the in-call check still heard that voice and remembered the mute as safe: the
+  other side heard nothing (Redmi Note 8; perhaps also #14 on a Poco X3 Pro). The phone's microphone stays on there,
+  the Android app says so in orange under **Muted**, the link log and problem report give the reason, and the
+  self-test no longer tests that mute. The iPhone's Link tab already shows **In this call: Microphone on** (#18,
+  thanks @arashfarahani).
+- Android phone: switching between **Off during calls**, **Muted** and **On** keeps what this phone showed of the
+  redirect modes. Before, every switch forgot it, so the next calls tried a mode known to fail again, each with a few
+  seconds of silence and a late uplink for the rest of that call. Choosing **Off during calls** again while it is
+  chosen, or the self-test, still tries them anew (#18, thanks @arashfarahani).
+
 ## 1.2.4 — 2026-11-25
 
 - Coming from 1.1.0: uninstall the 1.1.0 Android app first (1.2 APKs are signed with the project's release key), then
